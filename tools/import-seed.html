@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Import Seed Data - Zero Waste Dashboard</title>
+    <link rel="stylesheet" href="../css/styles.css" />
+  </head>
+  <body>
+    <div id="app" style="max-width:640px; margin:40px auto; padding:0 20px;">
+      <div class="card">
+        <h2>นำเข้าข้อมูลย้อนหลัง (ครั้งเดียว)</h2>
+        <p class="muted">
+          หน้านี้จะนำเข้าข้อมูลขาเข้า/ขาออกย้อนหลัง (CMC, ม.ค.-ก.ค. 2569) จากไฟล์ Excel เดิม เข้าสู่ Firestore
+          ใช้ครั้งเดียวตอนเริ่มระบบเท่านั้น แล้วลบไฟล์นี้ทิ้งได้
+        </p>
+        <div id="login-box">
+          <div class="field-row">
+            <div class="field"><label>อีเมล</label><input type="email" id="email" /></div>
+            <div class="field"><label>รหัสผ่าน</label><input type="password" id="password" /></div>
+            <div class="field"><button id="login-btn" class="primary">เข้าสู่ระบบ</button></div>
+          </div>
+          <div class="login-error" id="login-error"></div>
+        </div>
+        <div id="import-box" hidden>
+          <p>เข้าสู่ระบบแล้วในชื่อ <strong id="who"></strong></p>
+          <button id="import-btn" class="primary">เริ่มนำเข้าข้อมูล</button>
+          <p id="status" class="muted"></p>
+        </div>
+      </div>
+    </div>
+    <script type="module">
+      import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
+      import { batchImportIncoming, batchImportOutgoing } from "../js/db.js";
+
+      const loginBox = document.getElementById("login-box");
+      const importBox = document.getElementById("import-box");
+      const status = document.getElementById("status");
+
+      document.getElementById("login-btn").addEventListener("click", async () => {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        try {
+          await login(email, password);
+        } catch (err) {
+          document.getElementById("login-error").textContent = authErrorMessage(err);
+        }
+      });
+
+      onAuthChange((user) => {
+        if (user) {
+          loginBox.hidden = true;
+          importBox.hidden = false;
+          document.getElementById("who").textContent = user.email;
+        }
+      });
+
+      document.getElementById("import-btn").addEventListener("click", async () => {
+        const btn = document.getElementById("import-btn");
+        btn.disabled = true;
+        status.textContent = "กำลังโหลดไฟล์ seed...";
+        try {
+          const [incoming, outgoing] = await Promise.all([
+            fetch("../data/seed/incoming-2026.json").then((r) => r.json()),
+            fetch("../data/seed/outgoing-2026.json").then((r) => r.json()),
+          ]);
+          status.textContent = `กำลังนำเข้าขาเข้า ${incoming.length} รายการ...`;
+          await batchImportIncoming(incoming);
+          status.textContent = `กำลังนำเข้าขาออก ${outgoing.length} รายการ...`;
+          await batchImportOutgoing(outgoing);
+          status.textContent = `นำเข้าสำเร็จ: ขาเข้า ${incoming.length} รายการ, ขาออก ${outgoing.length} รายการ`;
+        } catch (err) {
+          status.textContent = "นำเข้าไม่สำเร็จ: " + err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Paste this into Firebase console -> Firestore Database -> Rules, then Publish.
+// Only signed-in users (the 2-3 accounts you create under Authentication) can read/write.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /incomingRecords/{docId} {
+      allow read, write: if request.auth != null;
+    }
+    match /outgoingRecords/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
