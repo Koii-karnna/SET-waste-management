@@ -1,3 +1,5 @@
+[hidden] { display: none !important; }
+
 :root {
   --set-yellow: #fbb034;
   --set-yellow-dark: #e59a1f;
