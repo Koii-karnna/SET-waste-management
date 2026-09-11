@@ -21,11 +21,11 @@ const STACK_CAT = ["Non Recycle", "Infectious Waste", "Recycle", "Organic", "Haz
 const BLD_COL = { A: "#1E88E5", B: "#9B9A8F", C: "#43A047", NP1: "#EF6C00", NP2: "#D32F2F" };
 const EST_POP = 900;
 
-let S = {};
+let S = { ch: {} };
 function init() {
   return { mode: "in", bg: "all", bld: "all", pType: "monthly", pOpts: [], pIdx: 0, inD: [], outD: [], ch: {}, root: null };
 }
-function destroyCh() { Object.values(S.ch).forEach(c => c.destroy()); S.ch = {}; }
+function destroyCh() { if (S.ch) Object.values(S.ch).forEach(c => c.destroy()); S.ch = {}; }
 
 function fmtWk(s, e) {
   const d1 = parseISO(s), d2 = parseISO(e);
