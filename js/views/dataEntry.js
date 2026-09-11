@@ -51,14 +51,14 @@ function renderIncomingForm(root) {
           <select id="in-building"></select>
         </div>
         <div class="field">
-          <button class="ghost" id="in-load">โหลดข้อมูลเดิม</button>
+          <button class="btn" id="in-load">โหลดข้อมูลเดิม</button>
         </div>
       </div>
       <div class="table-wrap">
         <table class="data-table" id="in-table"></table>
       </div>
       <div class="field-row" style="margin-top:16px;">
-        <button class="primary" id="in-save">บันทึก</button>
+        <button class="btn primary" id="in-save">บันทึก</button>
         <span class="muted" id="in-status"></span>
       </div>
     </div>
@@ -270,7 +270,7 @@ function renderOutgoingForm(root) {
           <input type="number" min="0" step="0.1" id="out-weight" />
         </div>
         <div class="field">
-          <button id="out-add">เพิ่มรายการ</button>
+          <button class="btn" id="out-add">เพิ่มรายการ</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -280,7 +280,7 @@ function renderOutgoingForm(root) {
         </table>
       </div>
       <div class="field-row" style="margin-top:12px;">
-        <button class="primary" id="out-save-all">บันทึกทั้งหมด</button>
+        <button class="btn primary" id="out-save-all">บันทึกทั้งหมด</button>
         <span class="muted" id="out-status"></span>
       </div>
     </div>

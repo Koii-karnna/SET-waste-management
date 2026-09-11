@@ -26,7 +26,7 @@ export function renderViewExport(container) {
           <input type="month" id="month-picker" value="${today.slice(0, 7)}" />
         </div>
         <div class="field">
-          <button id="load-range" class="primary">แสดงข้อมูล</button>
+          <button id="load-range" class="btn primary">แสดงข้อมูล</button>
         </div>
         <div class="field">
           <span class="muted" id="range-label"></span>
@@ -151,8 +151,8 @@ function renderResults(el, data) {
     <div class="card">
       <h3>ส่งออกรายงาน</h3>
       <div class="field-row">
-        <button id="export-excel">ออก Excel (.xlsx)</button>
-        <button id="export-pptx">ออก PowerPoint (.pptx)</button>
+        <button class="btn" id="export-excel">ออก Excel (.xlsx)</button>
+        <button class="btn" id="export-pptx">ออก PowerPoint (.pptx)</button>
       </div>
     </div>
   `;

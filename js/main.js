@@ -1,7 +1,9 @@
 import { onAuthChange, login, logout, authErrorMessage } from "./auth.js";
-import { renderDataEntry } from "./views/dataEntry.js";
-import { renderViewExport } from "./views/viewExport.js";
 import { renderDashboard } from "./views/dashboard.js";
+import { renderDataEntry } from "./views/dataEntry.js";
+import { renderIncoming } from "./views/incoming.js";
+import { renderOutgoing } from "./views/outgoing.js";
+import { renderViewExport } from "./views/viewExport.js";
 
 const loginScreen = document.getElementById("login-screen");
 const mainScreen = document.getElementById("main-screen");
@@ -13,12 +15,14 @@ const tabbar = document.getElementById("tabbar");
 const viewRoot = document.getElementById("view-root");
 
 const TABS = {
-  entry: { label: "กรอกข้อมูล", render: renderDataEntry },
-  viewExport: { label: "View / Export", render: renderViewExport },
-  dashboard: { label: "Dashboard", render: renderDashboard },
+  dashboard: { render: renderDashboard },
+  entry: { render: renderDataEntry },
+  incoming: { render: renderIncoming },
+  outgoing: { render: renderOutgoing },
+  viewExport: { render: renderViewExport },
 };
 
-let activeTab = "entry";
+let activeTab = "dashboard";
 
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();

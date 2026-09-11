@@ -11,11 +11,19 @@ export const CATEGORY_LABELS_TH = {
 };
 
 export const CATEGORY_COLORS = {
-  Organic: "#7CB342",
-  Recycle: "#2E9CCA",
-  "Non Recycle": "#8D8D8D",
-  "Infectious Waste": "#E4572E",
-  Hazard: "#B23A48",
+  Organic: "#43A047",
+  Recycle: "#F9A825",
+  "Non Recycle": "#1E88E5",
+  "Infectious Waste": "#EF6C00",
+  Hazard: "#D32F2F",
+};
+
+export const CATEGORY_BG_COLORS = {
+  Organic: "#E8F5E9",
+  Recycle: "#FFF8E1",
+  "Non Recycle": "#E3F2FD",
+  "Infectious Waste": "#FFF3E0",
+  Hazard: "#FDECEA",
 };
 
 export const WASTE_ITEMS = [
