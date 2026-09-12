@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fix SCIeco Disposal Method</title>
+    <link rel="stylesheet" href="../css/styles.css" />
+  </head>
+  <body>
+    <div id="app" style="max-width:640px; margin:40px auto; padding:0 20px;">
+      <div class="card">
+        <h2>แก้ไข disposalMethod ของ SCIeco</h2>
+        <p class="muted">
+          แก้ record ขาออกที่ destination = "SCIeco" ให้ disposalMethod เป็น "เผา RDF" ทั้งหมด
+        </p>
+        <div id="login-box">
+          <div class="field-row">
+            <div class="field"><label>อีเมล</label><input type="email" id="email" /></div>
+            <div class="field"><label>รหัสผ่าน</label><input type="password" id="password" /></div>
+            <div class="field"><button id="login-btn" class="btn primary">เข้าสู่ระบบ</button></div>
+          </div>
+          <div id="login-error" style="color:red"></div>
+        </div>
+        <div id="fix-box" hidden>
+          <p>เข้าสู่ระบบแล้วในชื่อ <strong id="who"></strong></p>
+          <button id="scan-btn" class="btn primary">สแกนหา SCIeco ที่ต้องแก้</button>
+          <button id="fix-btn" class="btn primary" hidden>แก้ไขทั้งหมด</button>
+          <pre id="log" style="white-space:pre-wrap; font-size:13px; margin-top:12px;"></pre>
+        </div>
+      </div>
+    </div>
+    <script type="module">
+      import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
+      import {
+        db, collection, query, where, getDocs, doc, writeBatch
+      } from "../js/firebase-init.js";
+
+      const loginBox = document.getElementById("login-box");
+      const fixBox = document.getElementById("fix-box");
+      const log = document.getElementById("log");
+      let toFix = [];
+
+      function appendLog(msg) { log.textContent += msg + "\n"; }
+
+      document.getElementById("login-btn").addEventListener("click", async () => {
+        const email = document.getElementById("email").value.trim();
+        const pw = document.getElementById("password").value;
+        try {
+          await login(email, pw);
+        } catch (err) {
+          document.getElementById("login-error").textContent = authErrorMessage(err);
+        }
+      });
+
+      onAuthChange((user) => {
+        if (user) {
+          loginBox.hidden = true;
+          fixBox.hidden = false;
+          document.getElementById("who").textContent = user.email;
+        }
+      });
+
+      document.getElementById("scan-btn").addEventListener("click", async () => {
+        appendLog("กำลังสแกน outgoingRecords ที่ destination = SCIeco ...");
+        const q = query(collection(db, "outgoingRecords"), where("destination", "==", "SCIeco"));
+        const snap = await getDocs(q);
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const wrong = all.filter(r => r.disposalMethod !== "เผา RDF");
+        appendLog(`พบ SCIeco ทั้งหมด ${all.length} records`);
+        appendLog(`ต้องแก้ไข ${wrong.length} records (disposalMethod ≠ "เผา RDF")`);
+        if (wrong.length > 0) {
+          toFix = wrong;
+          document.getElementById("fix-btn").hidden = false;
+          appendLog("กด 'แก้ไขทั้งหมด' เพื่อเปลี่ยนเป็น เผา RDF");
+        } else {
+          appendLog("ไม่มี record ที่ต้องแก้ไข ✓");
+        }
+      });
+
+      document.getElementById("fix-btn").addEventListener("click", async () => {
+        const btn = document.getElementById("fix-btn");
+        btn.disabled = true;
+        appendLog(`\nกำลังแก้ไข ${toFix.length} records ...`);
+        const CHUNK = 400;
+        let fixed = 0;
+        for (let i = 0; i < toFix.length; i += CHUNK) {
+          const chunk = toFix.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const r of chunk) {
+            batch.update(doc(db, "outgoingRecords", r.id), {
+              disposalMethod: "เผา RDF",
+              updatedBy: "fix-scieco-migration",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          await batch.commit();
+          fixed += chunk.length;
+          appendLog(`  แก้ไขแล้ว ${fixed} / ${toFix.length}`);
+        }
+        appendLog(`\nเสร็จสิ้น ✓ แก้ไขทั้งหมด ${fixed} records`);
+        toFix = [];
+        btn.hidden = true;
+      });
+    </script>
+  </body>
+</html>

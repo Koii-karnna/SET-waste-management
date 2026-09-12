@@ -46,9 +46,15 @@ export async function queryIncomingRange(startDate, endDate, buildingGroup) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+function normalizeOutgoing(record) {
+  const r = { ...record };
+  if (r.destination === "SCIeco") r.disposalMethod = "เผา RDF";
+  return r;
+}
+
 export async function addOutgoing(record, userEmail) {
   const ref = await addDoc(collection(db, OUTGOING), {
-    ...record,
+    ...normalizeOutgoing(record),
     createdBy: userEmail || null,
     createdAt: new Date().toISOString(),
   });
@@ -90,7 +96,7 @@ export async function batchImportIncoming(records) {
 export async function batchImportOutgoing(records) {
   await batchWrite(records, (rec) => ({
     ref: doc(collection(db, OUTGOING)),
-    data: { ...rec, createdBy: "seed-import", createdAt: new Date().toISOString() },
+    data: { ...normalizeOutgoing(rec), createdBy: "seed-import", createdAt: new Date().toISOString() },
   }));
 }
 
