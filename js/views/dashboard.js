@@ -598,14 +598,48 @@ function renderDisposalTrend() {
   });
 }
 
-function renderPC(recs) {
-  const byM = {};
-  if (S.mode === "in") { for (const r of recs) { const k = r.date.slice(0, 7); byM[k] = round1((byM[k] || 0) + sum(Object.values(r.items || {}))); } }
-  else { for (const r of recs) { const k = r.date.slice(0, 7); byM[k] = round1((byM[k] || 0) + r.weightKg); } }
+function getPCPeriods(recs) {
+  const byK = {};
+  const addKg = (k, kg, _s, _e) => {
+    if (!byK[k]) byK[k] = { kg: 0, _s, _e };
+    if (_s) { byK[k]._s = _s; byK[k]._e = _e; }
+    byK[k].kg += kg;
+  };
+  if (S.mode === "in") {
+    for (const r of recs) {
+      const kg = sum(Object.values(r.items || {}));
+      if (S.pType === "weekly") { addKg(r.date, kg); }
+      else if (S.pType === "monthly" && S.pIdx > 0) { const wr = weekRange(r.date); addKg(wr.start, kg, wr.start, wr.end); }
+      else { addKg(r.date.slice(0, 7), kg); }
+    }
+  } else {
+    for (const r of recs) {
+      if (S.pType === "weekly") { addKg(r.date, r.weightKg); }
+      else if (S.pType === "monthly" && S.pIdx > 0) { const wr = weekRange(r.date); addKg(wr.start, r.weightKg, wr.start, wr.end); }
+      else { addKg(r.date.slice(0, 7), r.weightKg); }
+    }
+  }
+  return Object.entries(byK).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
+    let lbl, days;
+    if (S.pType === "weekly") {
+      const dt = parseISO(k); lbl = `${DOW[dt.getDay()]} ${dt.getDate()}/${dt.getMonth() + 1}`; days = 1;
+    } else if (S.pType === "monthly" && S.pIdx > 0) {
+      const ds = parseISO(v._s), de = parseISO(v._e);
+      lbl = ds.getMonth() === de.getMonth() ? `${ds.getDate()}-${de.getDate()} ${MS[de.getMonth()]}` : `${ds.getDate()} ${MS[ds.getMonth()]}-${de.getDate()} ${MS[de.getMonth()]}`;
+      days = Math.round((de - ds) / 86400000) + 1;
+    } else {
+      const [y, m] = k.split("-").map(Number); lbl = MS[m - 1]; days = new Date(y, m, 0).getDate();
+    }
+    return { k, lbl, kg: round1(v.kg), days };
+  });
+}
 
-  const months = Object.keys(byM).sort();
-  const labels = months.map(k => MS[+k.slice(5, 7) - 1]);
-  const kpd = months.map(k => { const [y, m] = k.split("-").map(Number); const days = new Date(y, m, 0).getDate(); return Math.round(byM[k] / EST_POP / days * 100) / 100; });
+function renderPC(recs) {
+  const periods = getPCPeriods(recs);
+  if (!periods.length) return;
+  const labels = periods.map(p => p.lbl);
+  const kpd = periods.map(p => Math.round(p.kg / EST_POP / p.days * 100) / 100);
+  const totK = periods.map(p => round1(p.kg / 1000));
 
   S.ch.pc = new Chart(S.root.querySelector("#cP"), {
     type: "line",
@@ -613,14 +647,14 @@ function renderPC(recs) {
       labels,
       datasets: [
         { label: "กก./คน/วัน", data: kpd, borderColor: "#FBB034", backgroundColor: "#FBB03420", fill: true, tension: 0.35, borderWidth: 2.5, pointBackgroundColor: "#FBB034", pointRadius: 4, datalabels: { display: false } },
-        { label: "ขยะรวม (พัน กก.)", data: months.map(k => round1(byM[k] / 1000)), borderColor: "#1E88E5", fill: false, tension: 0.35, borderWidth: 2, borderDash: [5, 3], pointRadius: 3, yAxisID: "y2", datalabels: { display: false } }
+        { label: "ขยะรวม (พัน กก.)", data: totK, borderColor: "#1E88E5", fill: false, tension: 0.35, borderWidth: 2, borderDash: [5, 3], pointRadius: 3, yAxisID: "y2", datalabels: { display: false } }
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 12, font: { size: 11 } } }, datalabels: { display: false } },
       scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 12 } } },
+        x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45 } },
         y: { position: "left", grid: { color: "#E8E6DF" }, title: { display: true, text: "กก./คน/วัน", font: { size: 11 } }, ticks: { font: { size: 11 } } },
         y2: { position: "right", grid: { display: false }, title: { display: true, text: "พัน กก.", font: { size: 11 } }, ticks: { font: { size: 11 } } }
       }
