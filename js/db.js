@@ -6,6 +6,8 @@ import {
   getDocs,
   setDoc,
   addDoc,
+  updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -62,6 +64,19 @@ export async function queryOutgoingRange(startDate, endDate) {
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function updateOutgoingRecord(id, data, userEmail) {
+  const ref = doc(db, OUTGOING, id);
+  await updateDoc(ref, {
+    ...data,
+    updatedBy: userEmail || null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function deleteOutgoingRecord(id) {
+  await deleteDoc(doc(db, OUTGOING, id));
 }
 
 // One-time historical import helper, used by tools/import-seed.html only.

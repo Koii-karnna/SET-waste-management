@@ -199,6 +199,7 @@ body {
 .btn.primary:hover { background: #e5a02a; }
 .btn svg { width: 16px; height: 16px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.small, .ghost.small { padding: 2px 8px; font-size: 12px; }
 
 button { font-family: inherit; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }

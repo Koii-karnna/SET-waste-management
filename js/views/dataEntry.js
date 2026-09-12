@@ -1,6 +1,6 @@
 import { WASTE_ITEMS, CATEGORIES, CATEGORY_LABELS_TH, CATEGORY_COLORS, OTHER_ITEM_ID, BUILDINGS } from "../data/wasteItems.js";
 import { DESTINATIONS, DESTINATION_BY_NAME, DISPOSAL_METHODS, VEHICLE_TYPES } from "../data/destinations.js";
-import { getIncoming, upsertIncoming, addOutgoing } from "../db.js";
+import { getIncoming, upsertIncoming, addOutgoing, queryOutgoingRange, updateOutgoingRecord, deleteOutgoingRecord } from "../db.js";
 import { getCurrentUser } from "../auth.js";
 import { todayISO, round1 } from "../utils.js";
 import { showToast } from "../main.js";
@@ -216,9 +216,11 @@ function fillTable(root, record) {
 // ---------------- ขาออก ----------------
 
 let pendingRows = [];
+let existingRows = [];
 
 function renderOutgoingForm(root) {
   pendingRows = [];
+  existingRows = [];
   root.innerHTML = `
     <div class="card">
       <div class="field-row">
@@ -226,6 +228,22 @@ function renderOutgoingForm(root) {
           <label>วันที่</label>
           <input type="date" id="out-date" value="${todayISO()}" />
         </div>
+        <div class="field">
+          <button class="btn" id="out-load">โหลดข้อมูลเดิม</button>
+        </div>
+      </div>
+      <div id="out-existing-section" hidden>
+        <h4 style="margin:12px 0 6px">รายการที่บันทึกแล้ว</h4>
+        <div class="table-wrap">
+          <table class="data-table" id="out-existing-table">
+            <thead><tr><th>รายการ</th><th>น้ำหนัก</th><th>ปลายทาง</th><th>วิธีกำจัด</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #E8E6DF" />
+      <h4 style="margin:0 0 8px">เพิ่มรายการใหม่</h4>
+      <div class="field-row">
         <div class="field" style="min-width:220px">
           <label>ปลายทาง</label>
           <select id="out-destination">
@@ -314,6 +332,22 @@ function renderOutgoingForm(root) {
     }
   });
 
+  root.querySelector("#out-load").addEventListener("click", async () => {
+    const date = root.querySelector("#out-date").value;
+    if (!date) return showToast("กรุณาเลือกวันที่", true);
+    const status = root.querySelector("#out-status");
+    status.textContent = "กำลังโหลด...";
+    try {
+      const recs = await queryOutgoingRange(date, date);
+      existingRows = recs;
+      renderExistingTable(root);
+      status.textContent = recs.length > 0 ? `พบ ${recs.length} รายการ` : "ไม่มีข้อมูลขาออกวันนี้";
+    } catch (err) {
+      status.textContent = "";
+      showToast("โหลดข้อมูลไม่สำเร็จ: " + err.message, true);
+    }
+  });
+
   root.querySelector("#out-add").addEventListener("click", () => {
     const itemId = root.querySelector("#out-item").value;
     const weight = parseFloat(root.querySelector("#out-weight").value);
@@ -370,12 +404,76 @@ function renderOutgoingForm(root) {
       pendingRows = [];
       renderPendingTable(root);
       status.textContent = "";
+      // reload existing records to show newly added
+      const recs = await queryOutgoingRange(date, date);
+      existingRows = recs;
+      renderExistingTable(root);
     } catch (err) {
       showToast("บันทึกไม่สำเร็จ: " + err.message, true);
       status.textContent = "";
     } finally {
       btn.disabled = false;
     }
+  });
+}
+
+function renderExistingTable(root) {
+  const section = root.querySelector("#out-existing-section");
+  const tbody = root.querySelector("#out-existing-table tbody");
+  if (existingRows.length === 0) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const itemMap = Object.fromEntries(WASTE_ITEMS.map(it => [it.id, it.nameTh]));
+  tbody.innerHTML = existingRows
+    .map((r) => `<tr data-id="${r.id}">
+        <td>${itemMap[r.itemId] || r.itemId || "-"}</td>
+        <td><input type="number" min="0" step="0.1" class="ex-weight" value="${r.weightKg}" style="width:80px" /></td>
+        <td>${r.destination || "-"}</td>
+        <td>${r.disposalMethod || "-"}</td>
+        <td>
+          <button class="btn small ex-save">บันทึก</button>
+          <button class="ghost small ex-del">ลบ</button>
+        </td>
+      </tr>`)
+    .join("");
+
+  tbody.querySelectorAll(".ex-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const tr = btn.closest("tr");
+      const id = tr.dataset.id;
+      const newWeight = parseFloat(tr.querySelector(".ex-weight").value);
+      if (!(newWeight >= 0)) return showToast("น้ำหนักไม่ถูกต้อง", true);
+      btn.disabled = true;
+      try {
+        await updateOutgoingRecord(id, { weightKg: round1(newWeight) }, getCurrentUser()?.email);
+        const rec = existingRows.find(r => r.id === id);
+        if (rec) rec.weightKg = round1(newWeight);
+        showToast("อัปเดตสำเร็จ");
+      } catch (err) {
+        showToast("อัปเดตไม่สำเร็จ: " + err.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  tbody.querySelectorAll(".ex-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const tr = btn.closest("tr");
+      const id = tr.dataset.id;
+      if (!confirm("ต้องการลบรายการนี้หรือไม่?")) return;
+      btn.disabled = true;
+      try {
+        await deleteOutgoingRecord(id);
+        existingRows = existingRows.filter(r => r.id !== id);
+        renderExistingTable(root);
+        showToast("ลบรายการสำเร็จ");
+      } catch (err) {
+        showToast("ลบไม่สำเร็จ: " + err.message, true);
+      }
+    });
   });
 }
 
