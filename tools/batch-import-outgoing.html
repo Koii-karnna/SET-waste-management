@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Batch Import Historical Outgoing Data</title>
+    <link rel="stylesheet" href="../css/styles.css" />
+    <style>
+      #app { max-width: 820px; margin: 40px auto; padding: 0 20px; }
+      #log { background: #1e1e1e; color: #ccc; font-family: Consolas, monospace; font-size: 12px; padding: 14px; border-radius: 8px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 14px; }
+      #log .ok  { color: #81C784; }
+      #log .err { color: #EF9A9A; }
+      #log .info { color: #FBB034; }
+      .progress-bar { height: 8px; background: #ddd; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+      .progress-bar .fill { height: 100%; background: var(--accent); transition: width .3s; }
+      .warn-box { background: #FFF3E0; border: 1px solid #FFB74D; border-radius: 8px; padding: 12px 16px; margin-top: 14px; font-size: 13px; }
+      .warn-box.danger { background: #FFEBEE; border-color: #E57373; }
+      .warn-box ul { margin: 6px 0 0; padding-left: 20px; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="card">
+        <h2>นำเข้าข้อมูลขาออกย้อนหลัง (Batch)</h2>
+        <p class="muted">อ่านไฟล์ Excel ขาออก 5 ไฟล์ (CMC 2023-2024, NP 2023-2024, NP 2026) แล้วนำเข้า Firestore อัตโนมัติ</p>
+
+        <div id="login-box" style="margin-top:18px;">
+          <div class="field-row">
+            <div class="field"><label>อีเมล</label><input type="email" id="email" /></div>
+            <div class="field"><label>รหัสผ่าน</label><input type="password" id="password" /></div>
+            <div class="field"><button id="login-btn" class="primary">เข้าสู่ระบบ</button></div>
+          </div>
+          <div id="login-error" style="color:red"></div>
+        </div>
+
+        <div id="main-box" hidden>
+          <p>เข้าสู่ระบบแล้ว: <strong id="who"></strong></p>
+          <button id="scan-btn" class="btn primary" style="padding:10px 28px; font-size:15px; margin-top:10px;">1. ตรวจสอบไฟล์ + ข้อมูลเดิม</button>
+          <div id="scan-result" hidden></div>
+          <div id="confirm-box" hidden style="margin-top:14px;">
+            <label style="font-size:13px;"><input type="checkbox" id="confirm-chk" /> ฉันตรวจสอบแล้วและต้องการนำเข้าข้อมูลต่อ (อาจมีรายการซ้ำถ้ามีข้อมูลเดิมอยู่แล้ว)</label>
+          </div>
+          <button id="start-btn" class="btn primary" style="padding:10px 28px; font-size:15px; margin-top:14px;" hidden>2. เริ่มนำเข้า Firestore</button>
+          <div class="progress-bar" style="display:none" id="pbar"><div class="fill" id="pfill" style="width:0%"></div></div>
+          <div id="log" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module">
+      import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
+      import { db, collection, doc, writeBatch } from "../js/firebase-init.js";
+      import { queryOutgoingRange } from "../js/db.js";
+
+      // ── Item mapping (same as incoming) ──
+      const ITEMS = {
+        1:"เศษอาหาร - pantry / canteen / catering",2:"ใบไม้ กิ่งไม้",3:"กระดาษ - ความลับ",
+        4:"กระดาษ - กรวยกระดาษ/ แก้วกระดาษ / อื่นๆ",5:"กระดาษ - กล่องนม / กล่องผลไม้",
+        6:"ห่วงเปิดกระป๋องอลูมิเนียม (ตู้บริจาคทำขาเทียม)",7:"พลาสติก - ถุงยืด / บรรจุภัณฑ์ยืด",
+        8:"พลาสติก - ซองวิบวับ",9:"พลาสติก - กล่อง / บรรจุภัณฑ์แข็ง",10:"พลาสติก - แก้ว",
+        11:"พลาสติก - ขวด",12:"พลาสติก - ฝา",13:"พลาสติก - ช้อน-ส้อม",14:"พลาสติก - หลอด",
+        15:"เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิปหนีบกระดาษ)",
+        16:"อลูมิเนียม - กล่อง / กระป๋องอลูมิเนียม / ฝาขวดน้ำ",17:"ขวดแก้ว",
+        18:"ขยะอิเล็กทรอนิกส์ (AIS BOX)",19:"ปฎิทิน",20:"โฟม",21:"ไม้ - ตะเกียบ/ไม้เสียบ",
+        22:"บรรจุภัณฑ์ที่ป่นเปื้อนอาหาร (ถุงขนม/ถุงแกง)",23:"ทิชชู่ห้องน้ำ",24:"ทิชชู่เช็ดมือ",
+        25:"หน้ากากอนามัย/ATK",26:"ผ้าอนามัย",27:"แก้วแตก / กระจกแตก",28:"กระป๋องสเปรย์",
+        29:"บรรจุภัณฑ์ใส่สารเคมี",30:"หลอดไฟ",31:"ถ่านไฟฉาย",32:"ปากกาเมจิก ไวท์บอร์ด",
+        33:"กระป๋องสี",34:"ของแหลมคม(มีด ,คัตเตอร์, เข็ม) อื่นๆ",35:"อื่นๆ",
+      };
+      const nameToId = new Map();
+      for (const [id, name] of Object.entries(ITEMS)) nameToId.set(norm(name), id);
+      const VARIANTS = {
+        "เศษอาหาร - pantry / canteen / จัดเลี้ยง":"1",
+        "เศษอาหาร (ทำดิน) - pantry / canteen / จัดเลี้ยง":"1",
+        "เศษอาหาร (บ่อปลา) - pantry / canteen / จัดเลี้ยง":"1",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร เช่น ถุงอาหาร กล่องชานอ้อย":"22",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร(ถุงขนม/ถุงแกง)":"22",
+        "ปฏิทิน":"19",
+        "อลูมิเนียม - กล่อง/กระป๋อง/ฝาขวดน้ำ":"16",
+        "เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิป)":"15",
+        "พลาสติก - ซองวิบวับ (เคลือบอลูมิเนียม)":"8",
+      };
+      for (const [v, id] of Object.entries(VARIANTS)) nameToId.set(norm(v), id);
+      function norm(s) { return (s||"").replace(/\s+/g," ").trim().toLowerCase(); }
+      function resolveItemId(rawName) {
+        const n = norm(rawName);
+        if (nameToId.has(n)) return { id: nameToId.get(n), matched: true };
+        for (const [key, id] of nameToId) {
+          if (n.includes(key) || key.includes(n)) return { id, matched: true };
+        }
+        return { id: "35", matched: false };
+      }
+
+      // ── Date parsing (fixed to handle Buddhist-Era years on Date objects too) ──
+      function parseDate(raw) {
+        if (raw == null || raw === "") return null;
+        if (raw instanceof Date) {
+          if (isNaN(raw.getTime())) return null;
+          let y = raw.getFullYear();
+          if (y >= 2400) y -= 543;
+          return fmtISO(y, raw.getMonth()+1, raw.getDate());
+        }
+        if (typeof raw === "number") {
+          const dt = XLSX.SSF.parse_date_code(raw);
+          if (dt) return fmtISO(dt.y, dt.m, dt.d);
+          return null;
+        }
+        const parts = String(raw).trim().split("/");
+        if (parts.length === 3) {
+          let [d, m, y] = parts.map(Number);
+          if (isNaN(d)||isNaN(m)||isNaN(y)) return null;
+          if (y >= 2400) y -= 543;
+          if (y < 100) y += 2000;
+          return fmtISO(y, m, d);
+        }
+        return null;
+      }
+      function fmtISO(y,m,d) { return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+
+      // ── Files to import ──
+      // Drop the historical Excel files into data/import/ (see naming below)
+      // before running this tool; edit this list to match what's present.
+      const FILES = [
+        { url: "/data/import/out-cmc-2023.xlsx", label: "CMC 2023" },
+        { url: "/data/import/out-cmc-2024.xlsx", label: "CMC 2024" },
+        { url: "/data/import/out-cmc-2025.xlsx", label: "CMC 2025" },
+        { url: "/data/import/out-np-2023.xlsx",  label: "NP 2023" },
+        { url: "/data/import/out-np-2024.xlsx",  label: "NP 2024" },
+        { url: "/data/import/out-np-2025.xlsx",  label: "NP 2025" },
+        { url: "/data/import/out-np-2026.xlsx",  label: "NP 2026" },
+      ];
+
+      // Pick the sheet holding the FULL consolidated data — the header row
+      // (วันที่/ประเภท/รายการ/น้ำหนัก) shows up on multiple sheets (per-month
+      // duplicates + a combined "All"/"รวม" sheet); take the one with the
+      // most rows so per-month duplicate sheets are never double-counted.
+      function findMainSheet(wb) {
+        let best = null, bestRows = 0;
+        for (const name of wb.SheetNames) {
+          const ws = wb.Sheets[name];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          if (rows.length < 2) continue;
+          const h = rows[0].map(String);
+          if (h[0]?.includes("วันที่") && h[1]?.includes("ประเภท") && h[2]?.includes("รายการ") && h[3]?.includes("น้ำหนัก")) {
+            if (rows.length > bestRows) { best = { name, rows }; bestRows = rows.length; }
+          }
+        }
+        return best;
+      }
+
+      function parseOutgoingRows(rows) {
+        const out = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length < 4) continue;
+          const date = parseDate(row[0]);
+          if (!date) continue;
+          const weight = parseFloat(row[3]);
+          if (isNaN(weight) || weight <= 0) continue;
+          const category = String(row[1] || "").trim();
+          const itemName = String(row[2] || "").trim();
+          const { id: itemId, matched } = resolveItemId(itemName);
+          const destination = String(row[4] || "").trim();
+          let disposalMethod = String(row[5] || "").trim();
+          if (destination === "SCIeco") disposalMethod = "เผา RDF";
+          const destinationAddress = String(row[6] || "").trim();
+          const vehicleType = String(row[7] || "").trim();
+          out.push({
+            date, itemId, category, weightKg: Math.round(weight*10)/10,
+            destination, disposalMethod, destinationAddress, vehicleType,
+            _matched: matched, _itemName: itemName,
+          });
+        }
+        return out;
+      }
+
+      // ── DOM ──
+      const $ = id => document.getElementById(id);
+      const logEl = $("log");
+      function log(msg, cls) {
+        const s = document.createElement("span");
+        if (cls) s.className = cls;
+        s.textContent = msg + "\n";
+        logEl.appendChild(s);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // ── Auth ──
+      $("login-btn").addEventListener("click", async () => {
+        try { await login($("email").value.trim(), $("password").value); }
+        catch(e) { $("login-error").textContent = authErrorMessage(e); }
+      });
+      onAuthChange(u => {
+        if (u) {
+          $("login-box").hidden = true;
+          $("main-box").hidden = false;
+          $("who").textContent = u.email;
+        }
+      });
+
+      let parsedByFile = []; // [{label, records}]
+
+      // ── Step 1: scan files + check existing Firestore data ──
+      $("scan-btn").addEventListener("click", async () => {
+        const btn = $("scan-btn");
+        btn.disabled = true;
+        $("scan-result").hidden = false;
+        $("scan-result").innerHTML = "กำลังอ่านไฟล์...";
+        parsedByFile = [];
+        const unmapped = new Set();
+        let grandTotal = 0;
+        let minDate = null, maxDate = null;
+        let rowsHtml = "";
+
+        for (const file of FILES) {
+          const resp = await fetch(file.url);
+          if (!resp.ok) { rowsHtml += `<div style="color:red">${file.label}: โหลดไฟล์ไม่สำเร็จ (${resp.status})</div>`; continue; }
+          const buf = await resp.arrayBuffer();
+          const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+          const main = findMainSheet(wb);
+          if (!main) { rowsHtml += `<div style="color:red">${file.label}: ไม่พบ sheet ข้อมูลหลัก</div>`; continue; }
+          const records = parseOutgoingRows(main.rows);
+          records.forEach(r => { if (!r._matched && r._itemName) unmapped.add(r._itemName); });
+          const dates = records.map(r => r.date).sort();
+          if (dates.length) {
+            if (!minDate || dates[0] < minDate) minDate = dates[0];
+            if (!maxDate || dates[dates.length-1] > maxDate) maxDate = dates[dates.length-1];
+          }
+          parsedByFile.push({ label: file.label, records, range: dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : "-" });
+          grandTotal += records.length;
+          rowsHtml += `<div>${file.label}: sheet "<b>${main.name}</b>" → <b>${records.length}</b> แถว (${dates.length ? dates[0]+" → "+dates[dates.length-1] : "ไม่มีวันที่ที่ใช้ได้"})</div>`;
+        }
+
+        rowsHtml += `<div style="margin-top:8px;font-weight:600">รวมทั้งหมด: ${grandTotal} แถว</div>`;
+        if (unmapped.size > 0) {
+          rowsHtml += `<div style="margin-top:8px;color:#B26A00">รายการที่ไม่พบ mapping (จะใช้ "อื่นๆ" id=35): ${unmapped.size} รายการ</div>`;
+          rowsHtml += `<div style="max-height:100px;overflow-y:auto;font-size:12px;color:#B26A00">${[...unmapped].map(n => "- "+n).join("<br>")}</div>`;
+        }
+
+        // Check existing Firestore data in the overall date range
+        let existing = [];
+        if (minDate && maxDate) {
+          rowsHtml += `<div style="margin-top:10px">กำลังตรวจสอบข้อมูลเดิมในช่วง ${minDate} → ${maxDate} ...</div>`;
+          $("scan-result").innerHTML = rowsHtml;
+          existing = await queryOutgoingRange(minDate, maxDate);
+        }
+
+        if (existing.length > 0) {
+          const byYear = {};
+          for (const r of existing) { const y = r.date.slice(0,4); byYear[y] = (byYear[y]||0)+1; }
+          const existKeySet = new Set(existing.map(r => `${r.date}|${r.itemId}|${r.weightKg}|${r.destination}`));
+          const existDateSet = new Set(existing.map(r => r.date));
+          const existDestSet = new Set(existing.map(r => r.destination));
+          rowsHtml += `<div class="warn-box danger"><b>⚠ พบข้อมูลขาออกเดิมในช่วงวันที่นี้อยู่แล้ว ${existing.length} รายการ</b>
+            <ul>${Object.entries(byYear).map(([y,c]) => `<li>${y}: ${c} รายการ</li>`).join("")}</ul>
+            <div>ปลายทางที่พบในข้อมูลเดิม: ${[...existDestSet].join(", ")}</div>`;
+          for (const pf of parsedByFile) {
+            const dupCount = pf.records.filter(r => existKeySet.has(`${r.date}|${r.itemId}|${r.weightKg}|${r.destination}`)).length;
+            const dateOverlap = pf.records.filter(r => existDateSet.has(r.date)).length;
+            if (dupCount > 0 || dateOverlap > 0) {
+              rowsHtml += `<div>&nbsp;&nbsp;↳ ${pf.label}: ${dupCount}/${pf.records.length} แถว ตรงกันทุกฟิลด์, ${dateOverlap}/${pf.records.length} แถว ตรงกันแค่วันที่ (อาจเป็นรายการเดียวกันที่กรอกข้อมูลต่างกัน)</div>`;
+            }
+          }
+          rowsHtml += `<div style="margin-top:6px">การนำเข้าซ้ำอาจทำให้ข้อมูลซ้ำซ้อน (นับยอดสองเท่า) กรุณาตรวจสอบให้แน่ใจก่อนดำเนินการต่อ</div></div>`;
+        } else if (minDate) {
+          rowsHtml += `<div class="warn-box">ไม่พบข้อมูลขาออกเดิมในช่วง ${minDate} → ${maxDate} — ปลอดภัยที่จะนำเข้า</div>`;
+        }
+
+        $("scan-result").innerHTML = rowsHtml;
+        $("confirm-box").hidden = false;
+        $("start-btn").hidden = false;
+        btn.disabled = false;
+      });
+
+      $("confirm-chk").addEventListener("change", e => {
+        $("start-btn").disabled = !e.target.checked;
+      });
+      $("start-btn").disabled = true;
+
+      // ── Step 2: write to Firestore ──
+      $("start-btn").addEventListener("click", async () => {
+        const btn = $("start-btn");
+        btn.disabled = true;
+        logEl.hidden = false;
+        logEl.innerHTML = "";
+        $("pbar").style.display = "block";
+
+        const CHUNK = 400;
+        let totalDocs = 0;
+
+        for (let fi = 0; fi < parsedByFile.length; fi++) {
+          const { label, records } = parsedByFile[fi];
+          log(`\n=== ${label} ===`, "info");
+          log(`เขียน ${records.length} แถว ลง Firestore...`);
+
+          for (let i = 0; i < records.length; i += CHUNK) {
+            const chunk = records.slice(i, i + CHUNK);
+            const batch = writeBatch(db);
+            for (const rec of chunk) {
+              const ref = doc(collection(db, "outgoingRecords"));
+              batch.set(ref, {
+                date: rec.date,
+                itemId: rec.itemId,
+                category: rec.category,
+                weightKg: rec.weightKg,
+                destination: rec.destination,
+                disposalMethod: rec.disposalMethod,
+                destinationAddress: rec.destinationAddress,
+                vehicleType: rec.vehicleType,
+                createdBy: "historical-import-outgoing",
+                createdAt: new Date().toISOString(),
+              });
+            }
+            await batch.commit();
+            const done = Math.min(i + CHUNK, records.length);
+            log(`  batch: ${done}/${records.length}`, "ok");
+          }
+          totalDocs += records.length;
+          log(`${label} เสร็จ: ${records.length} docs`, "ok");
+          $("pfill").style.width = Math.round(((fi + 1) / parsedByFile.length) * 100) + "%";
+        }
+
+        log(`\n========================================`, "info");
+        log(`นำเข้าทั้งหมดสำเร็จ: ${totalDocs} เอกสาร`, "ok");
+        btn.disabled = false;
+      });
+    </script>
+  </body>
+</html>

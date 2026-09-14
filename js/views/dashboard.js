@@ -418,10 +418,26 @@ function renderStack(periods) {
   }));
   ds.push({ label: "ค่าเฉลี่ย", data: Array(periods.length).fill(avg), type: "line", borderColor: "#23211F", borderWidth: 2, borderDash: [6, 4], pointRadius: 0, order: 1, fill: false, datalabels: { display: false } });
 
+  const stackTotalPlugin = {
+    id: "stackTotalText",
+    afterDraw(chart) {
+      const { ctx, scales: { x, y } } = chart;
+      ctx.save();
+      for (let i = 0; i < labels.length; i++) {
+        const xPos = x.getPixelForValue(i), yPos = y.getPixelForValue(totals[i]);
+        ctx.font = 'bold 11px "DM Sans"'; ctx.fillStyle = "#23211F";
+        ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        ctx.fillText(fN(totals[i]), xPos, yPos - 4);
+      }
+      ctx.restore();
+    }
+  };
+
   S.ch.st = new Chart(S.root.querySelector("#cS"), {
     type: "bar", data: { labels, datasets: ds },
     options: {
       responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 20 } },
       plugins: {
         legend: { display: false },
         datalabels: { color: "#fff", font: { size: 10.5, weight: "bold", family: "DM Sans" }, anchor: "center", align: "center" }
@@ -430,7 +446,8 @@ function renderStack(periods) {
         x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45 } },
         y: { stacked: true, grid: { color: "#E8E6DF" }, ticks: { font: { size: 11 }, callback: v => v >= 1000 ? (v / 1000) + "k" : v } }
       }
-    }
+    },
+    plugins: [stackTotalPlugin]
   });
 
   const cr = S.root.querySelector("#cr"); cr.innerHTML = "";
