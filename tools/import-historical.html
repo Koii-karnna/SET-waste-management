@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Import Historical Data - Zero Waste Dashboard</title>
+    <link rel="stylesheet" href="../css/styles.css" />
+    <style>
+      #app { max-width: 960px; margin: 40px auto; padding: 0 20px; }
+      .opts-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 14px; }
+      .opts-row .field { min-width: auto; }
+      #file-input { padding: 6px 0; }
+      .summary-box { background: #FAFAF7; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 14px; }
+      .summary-box h4 { margin: 0 0 8px; font-size: 14px; }
+      .summary-box .stat { display: inline-block; margin-right: 20px; font-size: 13px; }
+      .summary-box .stat strong { font-family: 'DM Sans', sans-serif; }
+      .unmapped-list { margin-top: 8px; padding: 8px 12px; background: var(--hazard-bg); border-radius: 6px; font-size: 12.5px; color: var(--hazard); max-height: 120px; overflow-y: auto; }
+      .unmapped-list span { display: block; padding: 1px 0; }
+      .preview-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; margin-bottom: 14px; }
+      .preview-wrap table.data th { position: sticky; top: 0; z-index: 1; }
+      #log-box { background: var(--accent-dark); color: #ccc; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; padding: 12px 14px; border-radius: var(--radius); max-height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 14px; }
+      #log-box .ok { color: #81C784; }
+      #log-box .err { color: #EF9A9A; }
+      #log-box .info { color: #FBB034; }
+      .progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+      .progress-bar .fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="card">
+        <h2>นำเข้าข้อมูลย้อนหลังจาก Excel</h2>
+        <p class="muted">อ่านไฟล์ Excel ขาเข้า/ขาออก แปลงข้อมูลและนำเข้า Firestore</p>
+
+        <!-- Login -->
+        <div id="login-box" style="margin-top:18px;">
+          <div class="field-row">
+            <div class="field"><label>อีเมล</label><input type="email" id="email" /></div>
+            <div class="field"><label>รหัสผ่าน</label><input type="password" id="password" /></div>
+            <div class="field"><button id="login-btn" class="primary">เข้าสู่ระบบ</button></div>
+          </div>
+          <div class="login-error" id="login-error"></div>
+        </div>
+
+        <!-- Main UI (hidden until login) -->
+        <div id="main-box" hidden>
+          <p style="margin-bottom:14px;">เข้าสู่ระบบแล้ว: <strong id="who"></strong></p>
+
+          <!-- Step 1: Options -->
+          <div class="opts-row">
+            <div class="field">
+              <label>ประเภทไฟล์</label>
+              <select id="file-type" class="sel">
+                <option value="incoming">ขาเข้า (Incoming)</option>
+                <option value="outgoing">ขาออก (Outgoing)</option>
+              </select>
+            </div>
+            <div class="field" id="bg-field" hidden>
+              <label>กลุ่มอาคาร (สำหรับขาออก)</label>
+              <select id="building-group" class="sel">
+                <option value="CMC">CMC</option>
+                <option value="NP">NP</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1; min-width:200px;">
+              <label>เลือกไฟล์ Excel (.xlsx)</label>
+              <input type="file" id="file-input" accept=".xlsx,.xls" multiple />
+            </div>
+            <div class="field">
+              <button id="parse-btn" class="primary" disabled>อ่านไฟล์</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Preview (hidden until parsed) -->
+          <div id="preview-section" hidden>
+            <div class="summary-box" id="summary-box"></div>
+            <div class="preview-wrap" id="preview-wrap"></div>
+            <button id="import-btn" class="primary" style="padding:10px 28px; font-size:15px;">นำเข้า Firestore</button>
+          </div>
+
+          <!-- Progress -->
+          <div id="progress-section" hidden>
+            <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+          </div>
+          <div id="log-box" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module">
+      import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
+      import {
+        db, collection, doc, setDoc, writeBatch,
+      } from "../js/firebase-init.js";
+
+      // ─── Item name mapping ────────────────────────────────────
+      const ITEMS = {
+        1: "เศษอาหาร - pantry / canteen / catering",
+        2: "ใบไม้ กิ่งไม้",
+        3: "กระดาษ - ความลับ",
+        4: "กระดาษ - กรวยกระดาษ/ แก้วกระดาษ / อื่นๆ",
+        5: "กระดาษ - กล่องนม / กล่องผลไม้",
+        6: "ห่วงเปิดกระป๋องอลูมิเนียม (ตู้บริจาคทำขาเทียม)",
+        7: "พลาสติก - ถุงยืด / บรรจุภัณฑ์ยืด",
+        8: "พลาสติก - ซองวิบวับ",
+        9: "พลาสติก - กล่อง / บรรจุภัณฑ์แข็ง",
+        10: "พลาสติก - แก้ว",
+        11: "พลาสติก - ขวด",
+        12: "พลาสติก - ฝา",
+        13: "พลาสติก - ช้อน-ส้อม",
+        14: "พลาสติก - หลอด",
+        15: "เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิปหนีบกระดาษ)",
+        16: "อลูมิเนียม - กล่อง / กระป๋องอลูมิเนียม / ฝาขวดน้ำ",
+        17: "ขวดแก้ว",
+        18: "ขยะอิเล็กทรอนิกส์ (AIS BOX)",
+        19: "ปฎิทิน",
+        20: "โฟม",
+        21: "ไม้ - ตะเกียบ/ไม้เสียบ",
+        22: "บรรจุภัณฑ์ที่ป่นเปื้อนอาหาร (ถุงขนม/ถุงแกง)",
+        23: "ทิชชู่ห้องน้ำ",
+        24: "ทิชชู่เช็ดมือ",
+        25: "หน้ากากอนามัย/ATK",
+        26: "ผ้าอนามัย",
+        27: "แก้วแตก / กระจกแตก",
+        28: "กระป๋องสเปรย์",
+        29: "บรรจุภัณฑ์ใส่สารเคมี",
+        30: "หลอดไฟ",
+        31: "ถ่านไฟฉาย",
+        32: "ปากกาเมจิก ไวท์บอร์ด",
+        33: "กระป๋องสี",
+        34: "ของแหลมคม(มีด ,คัตเตอร์, เข็ม) อื่นๆ",
+        35: "อื่นๆ",
+      };
+
+      // Build reverse lookup: normalised name -> id
+      const nameToId = new Map();
+      for (const [id, name] of Object.entries(ITEMS)) {
+        nameToId.set(norm(name), id);
+      }
+
+      // Known variants
+      const VARIANTS = {
+        "เศษอาหาร - pantry / canteen / จัดเลี้ยง": "1",
+        "เศษอาหาร (ทำดิน) - pantry / canteen / จัดเลี้ยง": "1",
+        "เศษอาหาร (บ่อปลา) - pantry / canteen / จัดเลี้ยง": "1",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร เช่น ถุงอาหาร กล่องชานอ้อย": "22",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร(ถุงขนม/ถุงแกง)": "22",
+        "ปฏิทิน": "19",
+        "อลูมิเนียม - กล่อง/กระป๋อง/ฝาขวดน้ำ": "16",
+        "เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิป)": "15",
+        "พลาสติก - ซองวิบวับ (เคลือบอลูมิเนียม)": "8",
+      };
+      for (const [v, id] of Object.entries(VARIANTS)) {
+        nameToId.set(norm(v), id);
+      }
+
+      function norm(s) {
+        return (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+      }
+
+      function resolveItemId(rawName) {
+        const n = norm(rawName);
+        if (nameToId.has(n)) return { id: nameToId.get(n), matched: true };
+        // partial match: try if any key is contained in n or n is contained in key
+        for (const [key, id] of nameToId) {
+          if (n.includes(key) || key.includes(n)) return { id, matched: true };
+        }
+        return { id: "35", matched: false };
+      }
+
+      // ─── Building code extraction ────────────────────────────
+      const BUILDING_MAP = {
+        "อาคาร A": { code: "A", group: "CMC" },
+        "อาคาร a": { code: "A", group: "CMC" },
+        "อาคาร B": { code: "B", group: "CMC" },
+        "อาคาร b": { code: "B", group: "CMC" },
+        "อาคาร C": { code: "C", group: "CMC" },
+        "อาคาร c": { code: "C", group: "CMC" },
+        "อาคาร NP1": { code: "NP1", group: "NP" },
+        "อาคาร np1": { code: "NP1", group: "NP" },
+        "อาคาร NP2": { code: "NP2", group: "NP" },
+        "อาคาร np2": { code: "NP2", group: "NP" },
+      };
+
+      function extractBuilding(raw) {
+        const s = (raw || "").trim();
+        for (const [pattern, info] of Object.entries(BUILDING_MAP)) {
+          if (s.toLowerCase() === pattern.toLowerCase()) return info;
+        }
+        // fallback: try to extract letter/code after "อาคาร"
+        const m = s.match(/อาคาร\s*(.+)/i);
+        if (m) {
+          const code = m[1].trim().toUpperCase();
+          const group = code.startsWith("NP") ? "NP" : "CMC";
+          return { code, group };
+        }
+        return null;
+      }
+
+      // ─── Date parsing ────────────────────────────────────────
+      function parseDate(raw) {
+        if (raw == null || raw === "") return null;
+
+        // If it's a JS Date object (SheetJS can produce these)
+        if (raw instanceof Date) {
+          if (isNaN(raw.getTime())) return null;
+          return formatISO(raw.getFullYear(), raw.getMonth() + 1, raw.getDate());
+        }
+
+        // If it's a number (Excel serial date)
+        if (typeof raw === "number") {
+          const dt = XLSX.SSF.parse_date_code(raw);
+          if (dt) return formatISO(dt.y, dt.m, dt.d);
+          return null;
+        }
+
+        // String: d/m/y
+        const s = String(raw).trim();
+        const parts = s.split("/");
+        if (parts.length === 3) {
+          let [d, m, y] = parts.map(Number);
+          if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+          // BE year detection: if year >= 2400, it's Buddhist Era
+          if (y >= 2400) y -= 543;
+          // Handle 2-digit year
+          if (y < 100) y += 2000;
+          return formatISO(y, m, d);
+        }
+
+        return null;
+      }
+
+      function formatISO(y, m, d) {
+        return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      }
+
+      // ─── State ────────────────────────────────────────────────
+      let parsedIncoming = [];   // { date, buildingCode, buildingGroup, items: {id: weight} }
+      let parsedOutgoing = [];   // { date, itemId, category, weightKg, destination, disposalMethod, destinationAddress, vehicleType }
+      let unmappedNames = new Set();
+
+      // ─── DOM refs ─────────────────────────────────────────────
+      const $ = (id) => document.getElementById(id);
+      const loginBox = $("login-box");
+      const mainBox  = $("main-box");
+      const logBox   = $("log-box");
+
+      // ─── Auth ─────────────────────────────────────────────────
+      $("login-btn").addEventListener("click", async () => {
+        const email = $("email").value.trim();
+        const pw = $("password").value;
+        try { await login(email, pw); }
+        catch (e) { $("login-error").textContent = authErrorMessage(e); }
+      });
+
+      onAuthChange((user) => {
+        if (user) {
+          loginBox.hidden = true;
+          mainBox.hidden = false;
+          $("who").textContent = user.email;
+        }
+      });
+
+      // ─── File type toggle ─────────────────────────────────────
+      $("file-type").addEventListener("change", () => {
+        $("bg-field").hidden = $("file-type").value !== "outgoing";
+        resetPreview();
+      });
+
+      $("file-input").addEventListener("change", () => {
+        $("parse-btn").disabled = $("file-input").files.length === 0;
+        resetPreview();
+      });
+
+      function resetPreview() {
+        $("preview-section").hidden = true;
+        $("progress-section").hidden = true;
+        logBox.hidden = true;
+        logBox.innerHTML = "";
+        parsedIncoming = [];
+        parsedOutgoing = [];
+        unmappedNames = new Set();
+      }
+
+      // ─── Parse button ─────────────────────────────────────────
+      $("parse-btn").addEventListener("click", () => {
+        const files = $("file-input").files;
+        if (!files.length) return;
+        resetPreview();
+        const type = $("file-type").value;
+        const promises = Array.from(files).map((f) => readExcelFile(f, type));
+        Promise.all(promises).then(() => showPreview(type));
+      });
+
+      function readExcelFile(file, type) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
+              for (const sheetName of wb.SheetNames) {
+                const ws = wb.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+                if (rows.length < 2) continue; // skip empty / header-only sheets
+                processSheet(rows, type, sheetName, file.name);
+              }
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      function processSheet(rows, type, sheetName, fileName) {
+        // Find header row: look for row containing "วันที่" or "ประเภท"
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const joined = rows[i].map(String).join(" ");
+          if (joined.includes("วันที่") || joined.includes("ประเภท")) {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx === -1) headerIdx = 0; // fallback: first row is header
+
+        for (let i = headerIdx + 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length < 4) continue;
+
+          if (type === "incoming") {
+            processIncomingRow(row);
+          } else {
+            processOutgoingRow(row);
+          }
+        }
+      }
+
+      function processIncomingRow(row) {
+        // Columns: 0=วันที่, 1=ประเภท, 2=รายการ, 3=น้ำหนัก, 4=ต้นทาง, 5=ปลายทาง, 6=รูปแบบ, 7=ที่อยู่, 8=ประเภทรถ
+        const dateRaw    = row[0];
+        const category   = String(row[1] || "").trim();
+        const itemName   = String(row[2] || "").trim();
+        const weightRaw  = row[3];
+        const sourceRaw  = String(row[4] || "").trim();
+
+        const date = parseDate(dateRaw);
+        if (!date) return; // skip rows without valid date
+
+        const weight = parseFloat(weightRaw);
+        if (isNaN(weight) || weight <= 0) return;
+
+        const { id: itemId, matched } = resolveItemId(itemName);
+        if (!matched && itemName) unmappedNames.add(itemName);
+
+        const building = extractBuilding(sourceRaw);
+        if (!building) return; // skip rows with no building
+
+        const roundedWeight = Math.round(weight * 10) / 10;
+        const docKey = `${date}_${building.code}`;
+
+        // Find or create aggregated doc
+        let existing = parsedIncoming.find((d) => d._key === docKey);
+        if (!existing) {
+          existing = {
+            _key: docKey,
+            date,
+            buildingCode: building.code,
+            buildingGroup: building.group,
+            items: {},
+          };
+          parsedIncoming.push(existing);
+        }
+        // Accumulate weight by item id
+        existing.items[itemId] = Math.round(((existing.items[itemId] || 0) + roundedWeight) * 10) / 10;
+      }
+
+      function processOutgoingRow(row) {
+        // Columns: 0=วันที่, 1=ประเภท, 2=รายการ, 3=น้ำหนัก, 4=ปลายทาง, 5=รูปแบบ, 6=ที่อยู่, 7=ประเภทรถ
+        const dateRaw     = row[0];
+        const category    = String(row[1] || "").trim();
+        const itemName    = String(row[2] || "").trim();
+        const weightRaw   = row[3];
+        const destination = String(row[4] || "").trim();
+        const disposal    = String(row[5] || "").trim();
+        const destAddr    = String(row[6] || "").trim();
+        const vehicleType = String(row[7] || "").trim();
+
+        const date = parseDate(dateRaw);
+        if (!date) return;
+
+        const weight = parseFloat(weightRaw);
+        if (isNaN(weight) || weight <= 0) return;
+
+        const { id: itemId, matched } = resolveItemId(itemName);
+        if (!matched && itemName) unmappedNames.add(itemName);
+
+        // SCIeco normalization
+        let finalDisposal = disposal;
+        if (destination === "SCIeco") finalDisposal = "เผา RDF";
+
+        parsedOutgoing.push({
+          date,
+          itemId,
+          category: category || "",
+          weightKg: Math.round(weight * 10) / 10,
+          destination: destination || "",
+          disposalMethod: finalDisposal || "",
+          destinationAddress: destAddr || "",
+          vehicleType: vehicleType || "",
+        });
+      }
+
+      // ─── Show preview ─────────────────────────────────────────
+      function showPreview(type) {
+        const records = type === "incoming" ? parsedIncoming : parsedOutgoing;
+        if (records.length === 0) {
+          $("summary-box").innerHTML = '<p style="color:var(--danger);">ไม่พบข้อมูลในไฟล์ที่เลือก กรุณาตรวจสอบรูปแบบไฟล์</p>';
+          $("preview-wrap").innerHTML = "";
+          $("preview-section").hidden = false;
+          $("import-btn").hidden = true;
+          return;
+        }
+        $("import-btn").hidden = false;
+
+        // Compute stats
+        let totalRows, dateRange;
+        if (type === "incoming") {
+          totalRows = parsedIncoming.length;
+          const dates = parsedIncoming.map((r) => r.date).sort();
+          dateRange = `${dates[0]} - ${dates[dates.length - 1]}`;
+        } else {
+          totalRows = parsedOutgoing.length;
+          const dates = parsedOutgoing.map((r) => r.date).sort();
+          dateRange = `${dates[0]} - ${dates[dates.length - 1]}`;
+        }
+
+        let summaryHTML = `<h4>สรุปข้อมูลที่อ่านได้</h4>`;
+        summaryHTML += `<span class="stat"><strong>${totalRows.toLocaleString()}</strong> ${type === "incoming" ? "เอกสาร (วัน+อาคาร)" : "แถว"}</span>`;
+        summaryHTML += `<span class="stat">ช่วงวันที่: <strong>${dateRange}</strong></span>`;
+        if (unmappedNames.size > 0) {
+          summaryHTML += `<span class="stat" style="color:var(--hazard);">รายการที่ไม่พบ (ใช้ อื่นๆ): <strong>${unmappedNames.size}</strong></span>`;
+          summaryHTML += `<div class="unmapped-list">`;
+          for (const name of unmappedNames) {
+            summaryHTML += `<span>- ${escHtml(name)}</span>`;
+          }
+          summaryHTML += `</div>`;
+        }
+        $("summary-box").innerHTML = summaryHTML;
+
+        // Table preview (max 20 rows)
+        let tableHTML;
+        if (type === "incoming") {
+          tableHTML = buildIncomingTable(parsedIncoming.slice(0, 20));
+        } else {
+          tableHTML = buildOutgoingTable(parsedOutgoing.slice(0, 20));
+        }
+        if (records.length > 20) {
+          tableHTML += `<p class="muted" style="margin-top:8px;">(แสดง 20 แถวแรกจากทั้งหมด ${records.length.toLocaleString()} แถว)</p>`;
+        }
+        $("preview-wrap").innerHTML = tableHTML;
+        $("preview-section").hidden = false;
+      }
+
+      function buildIncomingTable(rows) {
+        let h = `<table class="data"><thead><tr>
+          <th>Doc ID</th><th>วันที่</th><th>อาคาร</th><th>กลุ่ม</th><th>รายการ (id: kg)</th>
+        </tr></thead><tbody>`;
+        for (const r of rows) {
+          const itemsSummary = Object.entries(r.items).map(([id, w]) => `${id}: ${w}`).join(", ");
+          h += `<tr>
+            <td style="font-size:12px;">${escHtml(r._key)}</td>
+            <td>${r.date}</td>
+            <td>${escHtml(r.buildingCode)}</td>
+            <td>${escHtml(r.buildingGroup)}</td>
+            <td style="font-size:12px;">${escHtml(itemsSummary)}</td>
+          </tr>`;
+        }
+        h += `</tbody></table>`;
+        return h;
+      }
+
+      function buildOutgoingTable(rows) {
+        let h = `<table class="data"><thead><tr>
+          <th>วันที่</th><th>ประเภท</th><th>Item ID</th><th>น้ำหนัก</th><th>ปลายทาง</th><th>รูปแบบกำจัด</th><th>ประเภทรถ</th>
+        </tr></thead><tbody>`;
+        for (const r of rows) {
+          h += `<tr>
+            <td>${r.date}</td>
+            <td>${escHtml(r.category)}</td>
+            <td>${r.itemId}</td>
+            <td class="num">${r.weightKg}</td>
+            <td>${escHtml(r.destination)}</td>
+            <td>${escHtml(r.disposalMethod)}</td>
+            <td>${escHtml(r.vehicleType)}</td>
+          </tr>`;
+        }
+        h += `</tbody></table>`;
+        return h;
+      }
+
+      function escHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      // ─── Import to Firestore ──────────────────────────────────
+      $("import-btn").addEventListener("click", async () => {
+        const type = $("file-type").value;
+        const btn = $("import-btn");
+        btn.disabled = true;
+        $("progress-section").hidden = false;
+        logBox.hidden = false;
+        logBox.innerHTML = "";
+
+        try {
+          if (type === "incoming") {
+            await importIncoming();
+          } else {
+            await importOutgoing();
+          }
+        } catch (err) {
+          log(`ERROR: ${err.message}`, "err");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      const CHUNK = 400;
+
+      function setProgress(pct) {
+        $("progress-fill").style.width = pct + "%";
+      }
+
+      function log(msg, cls) {
+        const span = document.createElement("span");
+        if (cls) span.className = cls;
+        span.textContent = msg + "\n";
+        logBox.appendChild(span);
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+
+      async function importIncoming() {
+        const records = parsedIncoming;
+        const total = records.length;
+        log(`เริ่มนำเข้าขาเข้า ${total} เอกสาร...`, "info");
+
+        for (let i = 0; i < total; i += CHUNK) {
+          const chunk = records.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const rec of chunk) {
+            const docId = `${rec.date}_${rec.buildingCode}`;
+            const ref = doc(db, "incomingRecords", docId);
+            batch.set(ref, {
+              date: rec.date,
+              buildingCode: rec.buildingCode,
+              buildingGroup: rec.buildingGroup,
+              items: rec.items,
+              updatedBy: "historical-import",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          await batch.commit();
+          const done = Math.min(i + CHUNK, total);
+          const pct = Math.round((done / total) * 100);
+          setProgress(pct);
+          log(`  batch ${Math.floor(i / CHUNK) + 1}: เขียน ${chunk.length} docs (${done}/${total})`, "ok");
+        }
+        log(`นำเข้าขาเข้าสำเร็จ: ${total} เอกสาร`, "ok");
+      }
+
+      async function importOutgoing() {
+        const records = parsedOutgoing;
+        const total = records.length;
+        const bgGroup = $("building-group").value;
+        log(`เริ่มนำเข้าขาออก ${total} แถว (กลุ่มอาคาร: ${bgGroup})...`, "info");
+
+        for (let i = 0; i < total; i += CHUNK) {
+          const chunk = records.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const rec of chunk) {
+            const ref = doc(collection(db, "outgoingRecords"));
+            batch.set(ref, {
+              date: rec.date,
+              itemId: rec.itemId,
+              category: rec.category,
+              weightKg: rec.weightKg,
+              destination: rec.destination,
+              disposalMethod: rec.disposalMethod,
+              destinationAddress: rec.destinationAddress,
+              vehicleType: rec.vehicleType,
+              buildingGroup: bgGroup,
+              createdBy: "historical-import",
+              createdAt: new Date().toISOString(),
+            });
+          }
+          await batch.commit();
+          const done = Math.min(i + CHUNK, total);
+          const pct = Math.round((done / total) * 100);
+          setProgress(pct);
+          log(`  batch ${Math.floor(i / CHUNK) + 1}: เขียน ${chunk.length} docs (${done}/${total})`, "ok");
+        }
+        log(`นำเข้าขาออกสำเร็จ: ${total} แถว`, "ok");
+      }
+    </script>
+  </body>
+</html>

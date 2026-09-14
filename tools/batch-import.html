@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>Batch Import Historical Incoming Data</title>
+    <link rel="stylesheet" href="../css/styles.css" />
+    <style>
+      #app { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+      #log { background: #1e1e1e; color: #ccc; font-family: Consolas, monospace; font-size: 12px; padding: 14px; border-radius: 8px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 14px; }
+      #log .ok  { color: #81C784; }
+      #log .err { color: #EF9A9A; }
+      #log .info { color: #FBB034; }
+      .progress-bar { height: 8px; background: #ddd; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+      .progress-bar .fill { height: 100%; background: var(--accent); transition: width .3s; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="card">
+        <h2>นำเข้าข้อมูลขาเข้าย้อนหลัง (Batch)</h2>
+        <p class="muted">อ่านไฟล์ Excel ขาเข้า 6 ไฟล์ (CMC 2023-2025, NP 2023-2025) แล้วนำเข้า Firestore อัตโนมัติ</p>
+
+        <div id="login-box" style="margin-top:18px;">
+          <div class="field-row">
+            <div class="field"><label>อีเมล</label><input type="email" id="email" /></div>
+            <div class="field"><label>รหัสผ่าน</label><input type="password" id="password" /></div>
+            <div class="field"><button id="login-btn" class="primary">เข้าสู่ระบบ</button></div>
+          </div>
+          <div id="login-error" style="color:red"></div>
+        </div>
+
+        <div id="main-box" hidden>
+          <p>เข้าสู่ระบบแล้ว: <strong id="who"></strong></p>
+          <button id="start-btn" class="btn primary" style="padding:10px 28px; font-size:15px; margin-top:10px;">เริ่มนำเข้าทั้งหมด</button>
+          <div class="progress-bar" style="display:none" id="pbar"><div class="fill" id="pfill" style="width:0%"></div></div>
+          <div id="log" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module">
+      import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
+      import { db, collection, doc, setDoc, writeBatch } from "../js/firebase-init.js";
+
+      // ── Item mapping ──
+      const ITEMS = {
+        1:"เศษอาหาร - pantry / canteen / catering",2:"ใบไม้ กิ่งไม้",3:"กระดาษ - ความลับ",
+        4:"กระดาษ - กรวยกระดาษ/ แก้วกระดาษ / อื่นๆ",5:"กระดาษ - กล่องนม / กล่องผลไม้",
+        6:"ห่วงเปิดกระป๋องอลูมิเนียม (ตู้บริจาคทำขาเทียม)",7:"พลาสติก - ถุงยืด / บรรจุภัณฑ์ยืด",
+        8:"พลาสติก - ซองวิบวับ",9:"พลาสติก - กล่อง / บรรจุภัณฑ์แข็ง",10:"พลาสติก - แก้ว",
+        11:"พลาสติก - ขวด",12:"พลาสติก - ฝา",13:"พลาสติก - ช้อน-ส้อม",14:"พลาสติก - หลอด",
+        15:"เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิปหนีบกระดาษ)",
+        16:"อลูมิเนียม - กล่อง / กระป๋องอลูมิเนียม / ฝาขวดน้ำ",17:"ขวดแก้ว",
+        18:"ขยะอิเล็กทรอนิกส์ (AIS BOX)",19:"ปฎิทิน",20:"โฟม",21:"ไม้ - ตะเกียบ/ไม้เสียบ",
+        22:"บรรจุภัณฑ์ที่ป่นเปื้อนอาหาร (ถุงขนม/ถุงแกง)",23:"ทิชชู่ห้องน้ำ",24:"ทิชชู่เช็ดมือ",
+        25:"หน้ากากอนามัย/ATK",26:"ผ้าอนามัย",27:"แก้วแตก / กระจกแตก",28:"กระป๋องสเปรย์",
+        29:"บรรจุภัณฑ์ใส่สารเคมี",30:"หลอดไฟ",31:"ถ่านไฟฉาย",32:"ปากกาเมจิก ไวท์บอร์ด",
+        33:"กระป๋องสี",34:"ของแหลมคม(มีด ,คัตเตอร์, เข็ม) อื่นๆ",35:"อื่นๆ",
+      };
+
+      const nameToId = new Map();
+      for (const [id, name] of Object.entries(ITEMS)) nameToId.set(norm(name), id);
+
+      const VARIANTS = {
+        "เศษอาหาร - pantry / canteen / จัดเลี้ยง":"1",
+        "เศษอาหาร (ทำดิน) - pantry / canteen / จัดเลี้ยง":"1",
+        "เศษอาหาร (บ่อปลา) - pantry / canteen / จัดเลี้ยง":"1",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร เช่น ถุงอาหาร กล่องชานอ้อย":"22",
+        "บรรจุภัณฑ์ที่เปื้อนอาหาร(ถุงขนม/ถุงแกง)":"22",
+        "ปฏิทิน":"19",
+        "อลูมิเนียม - กล่อง/กระป๋อง/ฝาขวดน้ำ":"16",
+        "เหล็ก - กระป๋อง / เศษเหล็ก (แม็ค,คลิป)":"15",
+        "พลาสติก - ซองวิบวับ (เคลือบอลูมิเนียม)":"8",
+      };
+      for (const [v, id] of Object.entries(VARIANTS)) nameToId.set(norm(v), id);
+
+      function norm(s) { return (s||"").replace(/\s+/g," ").trim().toLowerCase(); }
+
+      function resolveItemId(rawName) {
+        const n = norm(rawName);
+        if (nameToId.has(n)) return { id: nameToId.get(n), matched: true };
+        for (const [key, id] of nameToId) {
+          if (n.includes(key) || key.includes(n)) return { id, matched: true };
+        }
+        return { id: "35", matched: false };
+      }
+
+      // ── Building extraction ──
+      function extractBuilding(raw) {
+        const s = (raw || "").trim();
+        const m = s.match(/อาคาร\s*(.+)/i);
+        if (!m) return null;
+        const code = m[1].trim().toUpperCase();
+        const group = code.startsWith("NP") ? "NP" : "CMC";
+        return { code, group };
+      }
+
+      // ── Date parsing ──
+      function parseDate(raw) {
+        if (raw == null || raw === "") return null;
+        if (raw instanceof Date) {
+          if (isNaN(raw.getTime())) return null;
+          return fmtISO(raw.getFullYear(), raw.getMonth()+1, raw.getDate());
+        }
+        if (typeof raw === "number") {
+          const dt = XLSX.SSF.parse_date_code(raw);
+          if (dt) return fmtISO(dt.y, dt.m, dt.d);
+          return null;
+        }
+        const parts = String(raw).trim().split("/");
+        if (parts.length === 3) {
+          let [d, m, y] = parts.map(Number);
+          if (isNaN(d)||isNaN(m)||isNaN(y)) return null;
+          if (y >= 2400) y -= 543;
+          if (y < 100) y += 2000;
+          return fmtISO(y, m, d);
+        }
+        return null;
+      }
+      function fmtISO(y,m,d) { return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+
+      // ── Files to import ──
+      const FILES = [
+        { url: "/data/import/in-cmc-2023.xlsx", label: "CMC 2023" },
+        { url: "/data/import/in-cmc-2024.xlsx", label: "CMC 2024" },
+        { url: "/data/import/in-cmc-2025.xlsx", label: "CMC 2025" },
+        { url: "/data/import/in-np-2023.xlsx",  label: "NP 2023" },
+        { url: "/data/import/in-np-2024.xlsx",  label: "NP 2024" },
+        { url: "/data/import/in-np-2025.xlsx",  label: "NP 2025" },
+      ];
+
+      // ── DOM ──
+      const $ = id => document.getElementById(id);
+      const logEl = $("log");
+
+      function log(msg, cls) {
+        const s = document.createElement("span");
+        if (cls) s.className = cls;
+        s.textContent = msg + "\n";
+        logEl.appendChild(s);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // ── Auth ──
+      $("login-btn").addEventListener("click", async () => {
+        try { await login($("email").value.trim(), $("password").value); }
+        catch(e) { $("login-error").textContent = authErrorMessage(e); }
+      });
+      onAuthChange(u => {
+        if (u) {
+          $("login-box").hidden = true;
+          $("main-box").hidden = false;
+          $("who").textContent = u.email;
+        }
+      });
+
+      // ── Main import flow ──
+      $("start-btn").addEventListener("click", async () => {
+        const btn = $("start-btn");
+        btn.disabled = true;
+        logEl.hidden = false;
+        logEl.innerHTML = "";
+        $("pbar").style.display = "block";
+
+        let totalDocs = 0;
+        let totalSkipped = 0;
+        const unmapped = new Set();
+
+        for (let fi = 0; fi < FILES.length; fi++) {
+          const file = FILES[fi];
+          log(`\n=== ${file.label} ===`, "info");
+          log(`กำลังโหลด ${file.url} ...`);
+
+          let buf;
+          try {
+            const resp = await fetch(file.url);
+            if (!resp.ok) { log(`ERROR: HTTP ${resp.status}`, "err"); continue; }
+            buf = await resp.arrayBuffer();
+          } catch(e) {
+            log(`ERROR: ${e.message}`, "err"); continue;
+          }
+
+          const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+          log(`พบ ${wb.SheetNames.length} sheets: ${wb.SheetNames.join(", ")}`);
+
+          const docs = new Map();
+
+          const MONTH_RE = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i;
+          for (const sheetName of wb.SheetNames) {
+            if (!MONTH_RE.test(sheetName.trim())) {
+              log(`  [skip] ${sheetName}`);
+              continue;
+            }
+            const ws = wb.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+            if (rows.length < 2) continue;
+
+            let headerIdx = -1;
+            for (let i = 0; i < Math.min(rows.length, 10); i++) {
+              const joined = rows[i].map(String).join(" ");
+              if (joined.includes("วันที่") || joined.includes("ประเภท")) { headerIdx = i; break; }
+            }
+            if (headerIdx === -1) headerIdx = 0;
+
+            let sheetCount = 0;
+            for (let i = headerIdx + 1; i < rows.length; i++) {
+              const row = rows[i];
+              if (!row || row.length < 4) continue;
+
+              const date = parseDate(row[0]);
+              if (!date) continue;
+
+              const weight = parseFloat(row[3]);
+              if (isNaN(weight) || weight <= 0) continue;
+
+              const itemName = String(row[2] || "").trim();
+              const { id: itemId, matched } = resolveItemId(itemName);
+              if (!matched && itemName) unmapped.add(itemName);
+
+              const sourceRaw = String(row[4] || "").trim();
+              const building = extractBuilding(sourceRaw);
+              if (!building) continue;
+
+              const docKey = `${date}_${building.code}`;
+              if (!docs.has(docKey)) {
+                docs.set(docKey, { date, buildingCode: building.code, buildingGroup: building.group, items: {} });
+              }
+              const d = docs.get(docKey);
+              d.items[itemId] = Math.round(((d.items[itemId] || 0) + Math.round(weight*10)/10) * 10) / 10;
+              sheetCount++;
+            }
+            if (sheetCount > 0) log(`  ${sheetName}: ${sheetCount} rows parsed`);
+          }
+
+          // Write to Firestore
+          const entries = Array.from(docs.values());
+          log(`รวม ${entries.length} เอกสาร จะเขียนลง Firestore...`, "info");
+
+          const CHUNK = 400;
+          for (let i = 0; i < entries.length; i += CHUNK) {
+            const chunk = entries.slice(i, i + CHUNK);
+            const batch = writeBatch(db);
+            for (const rec of chunk) {
+              const docId = `${rec.date}_${rec.buildingCode}`;
+              batch.set(doc(db, "incomingRecords", docId), {
+                date: rec.date,
+                buildingCode: rec.buildingCode,
+                buildingGroup: rec.buildingGroup,
+                items: rec.items,
+                updatedBy: "historical-import",
+                updatedAt: new Date().toISOString(),
+              });
+            }
+            await batch.commit();
+            const done = Math.min(i + CHUNK, entries.length);
+            log(`  batch: ${done}/${entries.length} docs`, "ok");
+          }
+
+          totalDocs += entries.length;
+          log(`${file.label} เสร็จ: ${entries.length} docs`, "ok");
+
+          $("pfill").style.width = Math.round(((fi + 1) / FILES.length) * 100) + "%";
+        }
+
+        log(`\n========================================`, "info");
+        log(`นำเข้าทั้งหมดสำเร็จ: ${totalDocs} เอกสาร`, "ok");
+        if (unmapped.size > 0) {
+          log(`\nรายการที่ไม่พบ mapping (ใช้ อื่นๆ id=35):`, "err");
+          for (const n of unmapped) log(`  - ${n}`, "err");
+        }
+        btn.disabled = false;
+      });
+    </script>
+  </body>
+</html>
