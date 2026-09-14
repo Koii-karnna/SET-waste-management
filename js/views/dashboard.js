@@ -41,7 +41,8 @@ function disposalGroup(r) {
 
 let S = { ch: {} };
 function init() {
-  return { mode: "in", bg: "all", bld: "all", pType: "monthly", pOpts: [], pIdx: 0,
+  const now = new Date();
+  return { mode: "in", bg: "all", bld: "all", yr: now.getFullYear(), pType: "monthly", pOpts: [], pIdx: 0,
            inD: [], outD: [], allIn: [], allOut: [], ch: {}, root: null };
 }
 function destroyCh() { if (S.ch) Object.values(S.ch).forEach(c => { try { c.destroy(); } catch (_) {} }); S.ch = {}; }
@@ -54,18 +55,21 @@ function fmtWk(s, e) {
 }
 
 function periodOpts() {
-  const now = new Date(), yr = now.getFullYear(), mo = now.getMonth(), be = BE(yr);
+  const yr = S.yr, be = BE(yr);
+  const now = new Date();
+  const maxMo = yr === now.getFullYear() ? now.getMonth() : 11;
   if (S.pType === "monthly") {
-    const o = [{ l: `${MS[0]} – ${MS[mo]} ${be}`, s: `${yr}-01-01`, e: eom(yr, mo) }];
-    for (let m = mo; m >= 0; m--) o.push({ l: `${MF[m]} ${be}`, s: `${yr}-${p2(m + 1)}-01`, e: eom(yr, m) });
+    const o = [{ l: `${MS[0]} – ${MS[maxMo]} ${be}`, s: `${yr}-01-01`, e: eom(yr, maxMo) }];
+    for (let m = maxMo; m >= 0; m--) o.push({ l: `${MF[m]} ${be}`, s: `${yr}-${p2(m + 1)}-01`, e: eom(yr, m) });
     return o;
   }
   if (S.pType === "weekly") {
-    const o = []; let a = todayISO();
-    for (let w = 0; w < 16; w++) { const r = weekRange(a); o.push({ l: fmtWk(r.start, r.end), s: r.start, e: r.end }); a = addDays(a, -7); }
-    return o;
+    const anchor = yr === now.getFullYear() ? todayISO() : `${yr}-12-31`;
+    const o = []; let a = anchor;
+    for (let w = 0; w < 52; w++) { const r = weekRange(a); if (r.start.slice(0, 4) < String(yr)) break; o.push({ l: fmtWk(r.start, r.end), s: r.start, e: r.end }); a = addDays(a, -7); }
+    return o.length ? o : [{ l: `ทั้งหมด ${be}`, s: `${yr}-01-01`, e: `${yr}-12-31` }];
   }
-  return [{ l: `${MS[0]} – ${MS[mo]} ${be} (ทั้งหมด)`, s: `${yr}-01-01`, e: eom(yr, mo) }];
+  return [{ l: `${MS[0]} – ${MS[maxMo]} ${be} (ทั้งหมด)`, s: `${yr}-01-01`, e: eom(yr, maxMo) }];
 }
 
 /* ── aggregation: by MONTH ── */
@@ -220,12 +224,16 @@ export function renderDashboard(container) {
 
 function html() {
   const bldOpts = ["A", "B", "C", "NP1", "NP2"].map(b => `<option value="${b}">${b.length > 2 ? b : "อาคาร " + b}</option>`).join("");
+  const now = new Date(), curYr = now.getFullYear();
+  const yrOpts = [];
+  for (let y = curYr; y >= 2023; y--) yrOpts.push(`<option value="${y}"${y === S.yr ? " selected" : ""}>${BE(y)}</option>`);
   return `
 <div class="controls">
   <div class="pill-group" id="mp"><button class="pill active" data-v="in">ขาเข้า</button><button class="pill" data-v="out">ขาออก</button></div>
   <div class="pill-group" id="bp"><button class="pill active" data-v="all">ทุกอาคาร</button><button class="pill" data-v="CMC">CMC</button><button class="pill" data-v="NP">NP</button></div>
   <select class="sel" id="bs"><option value="all">ทุกอาคาร</option>${bldOpts}</select>
   <div class="divider"></div>
+  <select class="sel" id="yr">${yrOpts.join("")}</select>
   <div class="period-pair">
     <select class="sel" id="pt"><option value="monthly" selected>รายเดือน</option><option value="weekly">รายสัปดาห์</option><option value="all">ทั้งหมด</option></select>
     <select class="sel" id="pr"></select>
@@ -266,10 +274,12 @@ function html() {
     <div class="panel-hint">กก./คน/วัน (ประมาณจากผู้ใช้ ~${EST_POP} คน/วัน)</div>
     <div class="chart-box" style="height:240px"><canvas id="cP"></canvas></div>
   </div>
-  <div class="yearly-placeholder">
-    <div style="font-size:40px;margin-bottom:8px">📊</div>
-    <div style="font-size:16px;font-weight:600;margin-bottom:6px">แนวโน้มรายปี</div>
-    <div style="font-size:13px;color:var(--text-2);max-width:300px">เปรียบเทียบปริมาณขยะย้อนหลังหลายปี<br><br><b style="color:var(--accent-dark)">รอข้อมูลปีก่อนๆ</b></div>
+  <div class="panel">
+    <span class="panel-title">เปรียบเทียบรายปี</span>
+    <div class="panel-hint">ปริมาณขยะรวมแต่ละปี แยกตามประเภท (กก.)</div>
+    <div class="chart-box" style="height:240px"><canvas id="cYr"></canvas></div>
+    <div class="change-row" id="crYr"></div>
+    <div class="stack-legend" id="stLegendYr"></div>
   </div>
 </div>
 <div id="catCards"></div>
@@ -284,6 +294,7 @@ function listen() {
   r.querySelector("#mp").onclick = e => { const b = e.target.closest(".pill"); if (!b) return; S.mode = b.dataset.v; pills(r.querySelector("#mp"), S.mode); renderAll(); };
   r.querySelector("#bp").onclick = e => { const b = e.target.closest(".pill"); if (!b) return; S.bg = b.dataset.v; pills(r.querySelector("#bp"), S.bg); updBldSel(); S.bld = "all"; r.querySelector("#bs").value = "all"; renderAll(); };
   r.querySelector("#bs").onchange = e => { S.bld = e.target.value; renderAll(); };
+  r.querySelector("#yr").onchange = e => { S.yr = +e.target.value; S.pType = "monthly"; r.querySelector("#pt").value = "monthly"; refreshPR(); load(); };
   r.querySelector("#pt").onchange = e => { S.pType = e.target.value; refreshPR(); load(); };
   r.querySelector("#pr").onchange = e => { S.pIdx = +e.target.value; load(); };
   r.querySelector("#bx").onclick = doXls;
@@ -309,10 +320,12 @@ function refreshPR() {
 
 async function load() {
   const p = S.pOpts[S.pIdx]; if (!p) return;
-  const now = new Date(), yr = now.getFullYear(), mo = now.getMonth();
-  const m5 = new Date(yr, mo - 5, 1);
+  const yr = S.yr;
+  const now = new Date();
+  const maxMo = yr === now.getFullYear() ? now.getMonth() : 11;
+  const m5 = new Date(yr, maxMo - 5, 1);
   const histS = `${m5.getFullYear()}-${p2(m5.getMonth() + 1)}-01`;
-  const histE = eom(yr, mo);
+  const histE = eom(yr, maxMo);
   const fetchS = histS < p.s ? histS : p.s;
   const fetchE = histE > p.e ? histE : p.e;
   try {
@@ -368,6 +381,7 @@ function renderAll() {
   renderDonut();
   renderDisposalTrend();
   renderPC(active);
+  renderYearly();
   renderCategoryCards();
   renderInsight();
 }
@@ -665,6 +679,97 @@ function renderPC(recs) {
       }
     }
   });
+}
+
+let yrReqId = 0;
+async function renderYearly() {
+  const reqId = ++yrReqId;
+  const now = new Date(), curYr = now.getFullYear();
+  const years = [];
+  for (let y = 2023; y <= curYr; y++) years.push(y);
+  const catTotals = {};
+  for (const y of years) {
+    const endMo = y === curYr ? now.getMonth() : 11;
+    const recs = await queryIncomingRange(`${y}-01-01`, eom(y, endMo));
+    const cw = {};
+    CATEGORIES.forEach(c => cw[c] = 0);
+    for (const r of recs) {
+      if (S.bg !== "all" && r.buildingGroup !== S.bg) continue;
+      if (S.bld !== "all" && r.buildingCode !== S.bld) continue;
+      for (const [id, kg] of Object.entries(r.items || {})) cw[WASTE_ITEM_BY_ID[id]?.category || "Non Recycle"] += kg;
+    }
+    catTotals[y] = cw;
+  }
+  if (reqId !== yrReqId || !S.root || !S.root.isConnected) return;
+  const labels = years.map(y => String(BE(y)));
+  const totals = years.map(y => round1(sum(CATEGORIES.map(c => catTotals[y][c] || 0))));
+  const datasets = CATEGORIES.map(cat => ({
+    label: cat,
+    data: years.map(y => round1(catTotals[y][cat] || 0)),
+    backgroundColor: CATEGORY_COLORS[cat],
+    borderRadius: 3,
+    datalabels: {
+      display: ctx => { const t = totals[ctx.dataIndex]; return t > 0 && (ctx.dataset.data[ctx.dataIndex] / t * 100) >= 5; },
+      formatter: (v, ctx) => { const t = totals[ctx.dataIndex]; return t > 0 ? (v / t * 100).toFixed(1) + "%" : ""; }
+    }
+  }));
+
+  const yearTotalPlugin = {
+    id: "yearTotalText",
+    afterDraw(chart) {
+      const { ctx, scales: { x, y } } = chart;
+      ctx.save();
+      for (let i = 0; i < labels.length; i++) {
+        const xPos = x.getPixelForValue(i), yPos = y.getPixelForValue(totals[i]);
+        ctx.font = 'bold 12px "DM Sans"'; ctx.fillStyle = "#23211F";
+        ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        ctx.fillText(fN(totals[i]) + " กก.", xPos, yPos - 4);
+      }
+      ctx.restore();
+    }
+  };
+
+  if (S.ch.yr) { try { S.ch.yr.destroy(); } catch(_) {} }
+  S.ch.yr = new Chart(S.root.querySelector("#cYr"), {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 22 } },
+      plugins: {
+        legend: { display: false },
+        datalabels: { color: "#fff", font: { size: 10.5, weight: "bold", family: "DM Sans" }, anchor: "center", align: "center" },
+        tooltip: {
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${fN(ctx.raw)} กก.` }
+        }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 12, weight: 600 } } },
+        y: { stacked: true, grid: { color: "#E8E6DF" }, ticks: { font: { size: 11 }, callback: v => fN(v) } }
+      }
+    },
+    plugins: [yearTotalPlugin]
+  });
+
+  const cr = S.root.querySelector("#crYr"); cr.innerHTML = "";
+  totals.forEach((t, i) => {
+    const d = document.createElement("div"); d.className = "change-cell";
+    if (i === 0 || totals[i - 1] === 0) { d.innerHTML = '<span class="flat">—</span>'; }
+    else { const c = ((t - totals[i - 1]) / totals[i - 1] * 100).toFixed(1); d.innerHTML = +c > 0 ? `<span class="up">↑ +${c}%</span>` : +c < 0 ? `<span class="down">↓ ${c}%</span>` : '<span class="flat">0%</span>'; }
+    cr.appendChild(d);
+  });
+  requestAnimationFrame(() => {
+    if (S.ch.yr?.chartArea) {
+      const ca = S.ch.yr.chartArea;
+      cr.style.paddingLeft = ca.left + "px";
+      cr.style.paddingRight = (S.ch.yr.width - ca.right) + "px";
+    }
+  });
+
+  const stLYr = S.root.querySelector("#stLegendYr");
+  stLYr.innerHTML = CATEGORIES.map(cat =>
+    `<span class="st-leg-item"><span class="st-leg-dot" style="background:${CATEGORY_COLORS[cat]}"></span>${CATEGORY_LABELS_TH[cat] || cat}</span>`
+  ).join("");
 }
 
 const CAT_ABBR = { Recycle: "RC", Organic: "OG", "Non Recycle": "NR", "Infectious Waste": "IW", Hazard: "HZ" };
