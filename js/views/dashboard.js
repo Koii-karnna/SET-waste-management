@@ -5,6 +5,7 @@ import {
 import { queryIncomingRange, queryOutgoingRange } from "../db.js";
 import { todayISO, parseISO, toISO, addDays, weekRange, round1, sum } from "../utils.js";
 import { showToast } from "../main.js";
+import { getCurrentRole } from "../auth.js";
 import { aggregateIncoming, aggregateOutgoing } from "./viewExport.js";
 import { exportExcel } from "../export/excelExport.js";
 import { exportPptx } from "../export/pptExport.js";
@@ -287,6 +288,10 @@ function listen() {
   r.querySelector("#pr").onchange = e => { S.pIdx = +e.target.value; load(); };
   r.querySelector("#bx").onclick = doXls;
   r.querySelector("#bpp").onclick = doPpt;
+  if (getCurrentRole() === "viewer") {
+    r.querySelector("#bx").hidden = true;
+    r.querySelector("#bpp").hidden = true;
+  }
 }
 
 function pills(g, v) { g.querySelectorAll(".pill").forEach(p => p.classList.toggle("active", p.dataset.v === v)); }

@@ -1,14 +1,27 @@
 rules_version = '2';
 
 // Paste this into Firebase console -> Firestore Database -> Rules, then Publish.
-// Only signed-in users (the 2-3 accounts you create under Authentication) can read/write.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /incomingRecords/{docId} {
-      allow read, write: if request.auth != null;
+
+    // users collection — read by any logged-in user, write only via Firebase Console
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if false;
     }
+
+    // incomingRecords — viewer can read, editor can write
+    match /incomingRecords/{docId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
+    }
+
+    // outgoingRecords — viewer can read, editor can write
     match /outgoingRecords/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
     }
   }
 }

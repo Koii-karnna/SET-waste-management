@@ -23,7 +23,13 @@
           </div>
           <div class="field">
             <label for="login-password">รหัสผ่าน</label>
-            <input type="password" id="login-password" required autocomplete="current-password" />
+            <div class="pw-wrap">
+              <input type="password" id="login-password" required autocomplete="current-password" />
+              <button type="button" class="pw-toggle" id="pw-toggle" aria-label="แสดงรหัสผ่าน">
+                <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" hidden><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M1 1l22 22"/><path d="M14.12 14.12a3 3 0 11-4.24-4.24"/></svg>
+              </button>
+            </div>
           </div>
           <div class="login-error" id="login-error"></div>
           <button type="submit" class="primary">เข้าสู่ระบบ</button>
@@ -39,6 +45,7 @@
         </div>
         <div class="header-right">
           <span id="user-email"></span>
+          <span id="role-badge" class="role-badge" hidden>ดูอย่างเดียว</span>
           <button id="logout-btn">ออกจากระบบ</button>
         </div>
       </header>

@@ -1,4 +1,4 @@
-import { onAuthChange, login, logout, authErrorMessage } from "./auth.js";
+import { onAuthChange, login, logout, authErrorMessage, getCurrentRole } from "./auth.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderDataEntry } from "./views/dataEntry.js";
 import { renderIncoming } from "./views/incoming.js";
@@ -64,6 +64,7 @@ onAuthChange((user) => {
     loginScreen.hidden = true;
     mainScreen.hidden = false;
     userEmailEl.textContent = user.email || "";
+    applyRole();
     setActiveTab(activeTab);
   } else {
     mainScreen.hidden = true;
@@ -71,6 +72,32 @@ onAuthChange((user) => {
     viewRoot.innerHTML = "";
   }
 });
+
+function applyRole() {
+  const role = getCurrentRole();
+  const isViewer = role === "viewer";
+  const entryTab = tabbar.querySelector('[data-tab="entry"]');
+  const exportTab = tabbar.querySelector('[data-tab="viewExport"]');
+  const roleBadge = document.getElementById("role-badge");
+  if (entryTab) entryTab.hidden = isViewer;
+  if (exportTab) exportTab.hidden = isViewer;
+  if (roleBadge) roleBadge.hidden = !isViewer;
+  if (isViewer && (activeTab === "entry" || activeTab === "viewExport")) {
+    activeTab = "dashboard";
+  }
+}
+
+// Password visibility toggle
+const pwToggle = document.getElementById("pw-toggle");
+const pwInput = document.getElementById("login-password");
+if (pwToggle && pwInput) {
+  pwToggle.addEventListener("click", () => {
+    const show = pwInput.type === "password";
+    pwInput.type = show ? "text" : "password";
+    pwToggle.querySelector(".eye-open").hidden = show;
+    pwToggle.querySelector(".eye-closed").hidden = !show;
+  });
+}
 
 export function showToast(message, isError) {
   const el = document.createElement("div");

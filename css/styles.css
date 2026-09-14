@@ -770,6 +770,41 @@ table.data-table input[type="number"] { width: 90px; }
   min-height: 1.2em;
 }
 
+/* Password toggle */
+.pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pw-wrap input {
+  width: 100%;
+  padding-right: 40px;
+}
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+}
+.pw-toggle:hover { color: var(--text); }
+.pw-toggle svg { width: 20px; height: 20px; }
+
+/* Role badge */
+.role-badge {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.12);
+  color: #9B9A8F;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ---------- Note ---------- */
 .note {
   margin-top: 20px;
