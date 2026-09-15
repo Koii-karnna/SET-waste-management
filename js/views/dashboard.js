@@ -110,6 +110,25 @@ function bldDaily(recs) {
   });
 }
 
+/* ── every Mon-Sun week overlapping [s,e], even ones with no records —
+   keeps weekly bar charts from stretching a lone bar to fill the whole
+   width when a month only has data for part of its weeks ── */
+function weekStartsInRange(s, e) {
+  const keys = [];
+  let cur = weekRange(s).start;
+  const lastStart = weekRange(e).start;
+  while (cur <= lastStart) { keys.push(cur); cur = addDays(cur, 7); }
+  return keys;
+}
+function weekStartsInMonth(p) { return weekStartsInRange(p.s, p.e); }
+function padWeeks(bm, fillFn) {
+  const p = S.pOpts[S.pIdx];
+  if (!p) return;
+  for (const k of weekStartsInMonth(p)) {
+    if (!bm[k]) bm[k] = fillFn(k);
+  }
+}
+
 /* ── aggregation: by WEEK (monthly mode, single month) ── */
 function weeklyBk(recs, mode) {
   const bm = {};
@@ -118,6 +137,7 @@ function weeklyBk(recs, mode) {
   } else {
     for (const r of recs) { const wr = weekRange(r.date); const k = wr.start; if (!bm[k]) { bm[k] = { _s: wr.start, _e: wr.end }; CATEGORIES.forEach(c => bm[k][c] = 0); } bm[k][r.category || "Non Recycle"] += r.weightKg; }
   }
+  padWeeks(bm, k => { const v = { _s: k, _e: weekRange(k).end }; CATEGORIES.forEach(c => v[c] = 0); return v; });
   return Object.entries(bm).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
     const ds = parseISO(v._s), de = parseISO(v._e);
     const lbl = ds.getMonth() === de.getMonth()
@@ -130,6 +150,7 @@ function weeklyBk(recs, mode) {
 function bldWeekly(recs) {
   const bm = {};
   for (const r of recs) { const wr = weekRange(r.date); const k = wr.start; if (!bm[k]) bm[k] = { _s: wr.start, _e: wr.end }; const t = sum(Object.values(r.items || {})); bm[k][r.buildingCode] = round1((bm[k][r.buildingCode] || 0) + t); }
+  padWeeks(bm, k => ({ _s: k, _e: weekRange(k).end }));
   return Object.entries(bm).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
     const ds = parseISO(v._s), de = parseISO(v._e);
     const lbl = ds.getMonth() === de.getMonth()
@@ -245,7 +266,7 @@ function html() {
 <div id="kpi" class="kpi-row"></div>
 <div class="panel">
   <div class="panel-head"><span class="panel-title">แนวโน้มปริมาณขยะ</span></div>
-  <div class="panel-hint">น้ำหนักรวมแยกประเภท (กก.) · % ในแต่ละชั้น · เส้นประ = ค่าเฉลี่ย</div>
+  <div class="panel-hint">น้ำหนักรวมแยกประเภท (กก.) · % ในแต่ละชั้น</div>
   <div class="chart-box" style="height:340px"><canvas id="cS"></canvas></div>
   <div class="change-row" id="cr"></div>
   <div class="stack-legend" id="stLegend"></div>
@@ -323,9 +344,10 @@ async function load() {
   const yr = S.yr;
   const now = new Date();
   const maxMo = yr === now.getFullYear() ? now.getMonth() : 11;
-  const m5 = new Date(yr, maxMo - 5, 1);
-  const histS = `${m5.getFullYear()}-${p2(m5.getMonth() + 1)}-01`;
+  const m11 = new Date(yr, maxMo - 11, 1);
+  const histS = `${m11.getFullYear()}-${p2(m11.getMonth() + 1)}-01`;
   const histE = eom(yr, maxMo);
+  S.histS = histS; S.histE = histE;
   const fetchS = histS < p.s ? histS : p.s;
   const fetchE = histE > p.e ? histE : p.e;
   try {
@@ -360,6 +382,27 @@ function cwOut(recs) {
   return w;
 }
 
+/* ── KPI averages: total over the trailing 12-month window (S.histS–S.histE)
+   divided by the number of weeks/months in that window — a stable yearly
+   baseline, independent of how sparse the current period is ── */
+function yearlyTotal() {
+  if (!S.histS) return 0;
+  let recs = (S.mode === "in" ? S.allIn : S.allOut).filter(r => r.date >= S.histS && r.date <= S.histE);
+  if (S.mode === "in") {
+    if (S.bg !== "all") recs = recs.filter(r => r.buildingGroup === S.bg);
+    if (S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
+  }
+  const cw = S.mode === "in" ? cwIn(recs) : cwOut(recs);
+  return sum(Object.values(cw));
+}
+function yearlyWeeklyAvg() {
+  const weeks = S.histS ? (weekStartsInRange(S.histS, S.histE).length || 1) : 1;
+  return round1(yearlyTotal() / weeks);
+}
+function yearlyMonthlyAvg() {
+  return round1(yearlyTotal() / 12);
+}
+
 function itemTot(recs, mode) {
   const t = {};
   if (mode === "in") { for (const r of recs) for (const [id, kg] of Object.entries(r.items || {})) t[id] = round1((t[id] || 0) + kg); }
@@ -375,7 +418,7 @@ function renderAll() {
   const active = S.mode === "in" ? inc : out;
   const cw = S.mode === "in" ? cwIn(active) : cwOut(active);
   const total = round1(sum(Object.values(cw)));
-  renderKPI(cw, total, active);
+  renderKPI(cw, total);
   renderStack(getStackPeriods(active, S.mode));
   S.mode === "in" ? renderBld(getBldPeriods(inc), inc) : renderBld([], []);
   renderDonut();
@@ -388,12 +431,11 @@ function renderAll() {
 
 /* ══════════════════════════════════ CHARTS ═══════════════════════════════════════ */
 
-function renderKPI(cw, total, recs) {
+function renderKPI(cw, total) {
   const ih = round1((cw["Infectious Waste"] || 0) + (cw["Hazard"] || 0));
   const pct = v => total > 0 ? (v / total * 100).toFixed(1) : "0.0";
-  const nMo = new Set(recs.map(r => (r.date || "").slice(0, 7))).size || 1;
   S.root.querySelector("#kpi").innerHTML = `
-    <div class="kpi hl"><div class="kpi-label">ขยะทั้งหมด</div><div class="kpi-val num">${fN(total)}<span class="u">กก.</span></div><div class="kpi-sub">เฉลี่ย ${fN(round1(total / nMo))} กก./เดือน</div></div>
+    <div class="kpi hl"><div class="kpi-label">ขยะทั้งหมด</div><div class="kpi-val num">${fN(total)}<span class="u">กก.</span></div><div class="kpi-sub">เฉลี่ยย้อนหลัง 1 ปี: ${fN(yearlyMonthlyAvg())} กก./เดือน · ${fN(yearlyWeeklyAvg())} กก./สัปดาห์</div></div>
     <div class="kpi"><div class="kpi-label"><span class="kpi-dot" style="background:var(--recycle)"></span>Recycle</div><div class="kpi-val num" style="color:var(--recycle)">${fN(round1(cw.Recycle || 0))}<span class="u">กก.</span></div><div class="kpi-sub">${pct(cw.Recycle || 0)}%</div></div>
     <div class="kpi"><div class="kpi-label"><span class="kpi-dot" style="background:var(--organic)"></span>Organic</div><div class="kpi-val num" style="color:var(--organic)">${fN(round1(cw.Organic || 0))}<span class="u">กก.</span></div><div class="kpi-sub">${pct(cw.Organic || 0)}%</div></div>
     <div class="kpi"><div class="kpi-label"><span class="kpi-dot" style="background:var(--nonrecycle)"></span>Non Recycle</div><div class="kpi-val num" style="color:var(--nonrecycle)">${fN(round1(cw["Non Recycle"] || 0))}<span class="u">กก.</span></div><div class="kpi-sub">${pct(cw["Non Recycle"] || 0)}%</div></div>
@@ -403,7 +445,6 @@ function renderKPI(cw, total, recs) {
 function renderStack(periods) {
   const labels = periods.map(p => p.lbl);
   const totals = periods.map(p => round1(sum(CATEGORIES.map(c => p.cats[c] || 0))));
-  const avg = totals.length ? round1(sum(totals) / totals.length) : 0;
 
   const ds = STACK_CAT.map((cat, i) => ({
     label: CATEGORY_LABELS_TH[cat] || cat,
@@ -416,7 +457,6 @@ function renderStack(periods) {
       formatter: (v, ctx) => { const t = totals[ctx.dataIndex]; return t > 0 ? (v / t * 100).toFixed(1) + "%" : ""; }
     }
   }));
-  ds.push({ label: "ค่าเฉลี่ย", data: Array(periods.length).fill(avg), type: "line", borderColor: "#23211F", borderWidth: 2, borderDash: [6, 4], pointRadius: 0, order: 1, fill: false, datalabels: { display: false } });
 
   const stackTotalPlugin = {
     id: "stackTotalText",
@@ -468,7 +508,7 @@ function renderStack(periods) {
   const stL = S.root.querySelector("#stLegend");
   stL.innerHTML = STACK_CAT.map(cat =>
     `<span class="st-leg-item"><span class="st-leg-dot" style="background:${CATEGORY_COLORS[cat]}"></span>${CATEGORY_LABELS_TH[cat] || cat}</span>`
-  ).join("") + `<span class="st-leg-item"><span class="st-leg-line"></span>ค่าเฉลี่ย</span>`;
+  ).join("");
 }
 
 function renderBld(data, recs) {
@@ -548,6 +588,7 @@ function getDisposalPeriods() {
     if (_s) { byK[k]._s = _s; byK[k]._e = _e; }
     const g = disposalGroup(r); if (g) byK[k][g] += r.weightKg || 0;
   }
+  if (S.pType === "monthly" && S.pIdx > 0) padWeeks(byK, k => { const v = { _s: k, _e: weekRange(k).end }; DISPOSAL_ORDER.forEach(g => v[g] = 0); return v; });
   return Object.entries(byK).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
     let lbl;
     if (S.pType === "weekly") { const dt = parseISO(k); lbl = `${DOW[dt.getDay()]} ${dt.getDate()}/${dt.getMonth() + 1}`; }
@@ -655,6 +696,7 @@ function getPCPeriods(recs) {
       else { addKg(r.date.slice(0, 7), r.weightKg); }
     }
   }
+  if (S.pType === "monthly" && S.pIdx > 0) padWeeks(byK, k => ({ kg: 0, _s: k, _e: weekRange(k).end }));
   return Object.entries(byK).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
     let lbl, days;
     if (S.pType === "weekly") {
