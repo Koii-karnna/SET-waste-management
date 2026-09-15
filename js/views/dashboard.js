@@ -373,20 +373,21 @@ function cwOut(recs) {
 /* ── KPI averages: total over the trailing 12-month window (S.histS–S.histE)
    divided by the number of weeks/months in that window — a stable yearly
    baseline, independent of how sparse the current period is ── */
-function yearlyTotal() {
+function yearlyTotal(modeOverride) {
+  const mode = modeOverride || S.mode;
   if (!S.histS) return 0;
-  let recs = (S.mode === "in" ? S.allIn : S.allOut).filter(r => r.date >= S.histS && r.date <= S.histE);
+  let recs = (mode === "in" ? S.allIn : S.allOut).filter(r => r.date >= S.histS && r.date <= S.histE);
   if (S.bg !== "all") recs = recs.filter(r => r.buildingGroup === S.bg);
-  if (S.mode === "in" && S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
-  const cw = S.mode === "in" ? cwIn(recs) : cwOut(recs);
+  if (mode === "in" && S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
+  const cw = mode === "in" ? cwIn(recs) : cwOut(recs);
   return sum(Object.values(cw));
 }
-function yearlyWeeklyAvg() {
+function yearlyWeeklyAvg(modeOverride) {
   const weeks = S.histS ? (weekStartsInRange(S.histS, S.histE).length || 1) : 1;
-  return round1(yearlyTotal() / weeks);
+  return round1(yearlyTotal(modeOverride) / weeks);
 }
-function yearlyMonthlyAvg() {
-  return round1(yearlyTotal() / 12);
+function yearlyMonthlyAvg(modeOverride) {
+  return round1(yearlyTotal(modeOverride) / 12);
 }
 
 function itemTot(recs, mode) {
@@ -394,6 +395,53 @@ function itemTot(recs, mode) {
   if (mode === "in") { for (const r of recs) for (const [id, kg] of Object.entries(r.items || {})) t[id] = round1((t[id] || 0) + kg); }
   else { for (const r of recs) if (r.itemId) t[r.itemId] = round1((t[r.itemId] || 0) + r.weightKg); }
   return t;
+}
+
+/* ── same "รายการสูงสุด" + "แนวโน้ม (เฉลี่ยปี vs เดือนล่าสุด)" data as the
+   category cards on screen, computed for incoming — reused by doPpt() so
+   the export can show the same cards as PowerPoint slides ── */
+function computeCatCards(inc) {
+  const catOrder = ["Recycle", "Organic", "Non Recycle", "Infectious Waste", "Hazard"];
+  const totals = itemTot(inc, "in");
+  const grandTotal = round1(sum(Object.values(totals)));
+  const buildFilter = r => {
+    if (S.bg !== "all" && r.buildingGroup !== S.bg) return false;
+    if (S.bld !== "all" && r.buildingCode !== S.bld) return false;
+    return true;
+  };
+  const mStats = monthlyInsight(S.allIn, "in", buildFilter);
+
+  return catOrder.map(cat => {
+    const catItems = WASTE_ITEMS.filter(it => it.category === cat && it.id !== OTHER_ITEM_ID)
+      .map(it => ({ id: it.id, name: it.nameTh, kg: totals[it.id] || 0 }))
+      .sort((a, b) => b.kg - a.kg);
+    const catTotal = round1(sum(catItems.map(it => it.kg)));
+    const catPct = grandTotal > 0 ? round1(catTotal / grandTotal * 1000) / 10 : 0;
+    const itemCount = catItems.filter(it => it.kg > 0).length;
+    const top3 = catItems.slice(0, 3).filter(it => it.kg > 0);
+    const items = top3.map(it => ({ name: it.name, kg: it.kg, pct: catTotal > 0 ? round1(it.kg / catTotal * 1000) / 10 : 0 }));
+
+    let trendLines = [], catAvg = 0, lastCatKg = 0, catCh = 0, mLbl = "";
+    if (mStats.length >= 2) {
+      const lastM = mStats[mStats.length - 1];
+      trendLines = top3.map(it => {
+        const avg = sum(mStats.map(m => m.items[it.id] || 0)) / mStats.length;
+        if (avg === 0) return null;
+        const lastVal = lastM.items[it.id] || 0;
+        const pc = round1(((lastVal - avg) / avg) * 100);
+        const lbl = it.name;
+        return { name: lbl, pc, abs: Math.abs(pc) };
+      }).filter(Boolean);
+
+      catAvg = round1(sum(mStats.map(m => { let s = 0; for (const it of catItems) s += (m.items[it.id] || 0); return s; })) / mStats.length);
+      for (const it of catItems) lastCatKg += (lastM.items[it.id] || 0);
+      lastCatKg = round1(lastCatKg);
+      catCh = catAvg > 0 ? round1(((lastCatKg - catAvg) / catAvg) * 100) : 0;
+      mLbl = MS[+lastM.month.slice(5, 7) - 1];
+    }
+
+    return { cat, catTotal, catPct, itemCount, items, trendLines, catAvg, lastCatKg, catCh, mLbl };
+  });
 }
 
 /* ══════════════════════════════════ RENDER ALL ═══════════════════════════════════ */
@@ -661,14 +709,14 @@ function renderDisposalTrend(out) {
   });
 }
 
-function getPCPeriods(recs) {
+function getPCPeriods(recs, mode) {
   const byK = {};
   const addKg = (k, kg, _s, _e) => {
     if (!byK[k]) byK[k] = { kg: 0, _s, _e };
     if (_s) { byK[k]._s = _s; byK[k]._e = _e; }
     byK[k].kg += kg;
   };
-  if (S.mode === "in") {
+  if (mode === "in") {
     for (const r of recs) {
       const kg = sum(Object.values(r.items || {}));
       if (S.pType === "weekly") { addKg(r.date, kg); }
@@ -699,7 +747,7 @@ function getPCPeriods(recs) {
 }
 
 function renderPC(recs) {
-  const periods = getPCPeriods(recs);
+  const periods = getPCPeriods(recs, S.mode);
   if (!periods.length) return;
   const labels = periods.map(p => p.lbl);
   const kpd = periods.map(p => Math.round(p.kg / EST_POP / p.days * 100) / 100);
@@ -726,9 +774,7 @@ function renderPC(recs) {
   });
 }
 
-let yrReqId = 0;
-async function renderYearly() {
-  const reqId = ++yrReqId;
+async function computeYearlyIncomingData() {
   const now = new Date(), curYr = now.getFullYear();
   const years = [];
   for (let y = 2023; y <= curYr; y++) years.push(y);
@@ -745,6 +791,13 @@ async function renderYearly() {
     }
     catTotals[y] = cw;
   }
+  return { years, catTotals };
+}
+
+let yrReqId = 0;
+async function renderYearly() {
+  const reqId = ++yrReqId;
+  const { years, catTotals } = await computeYearlyIncomingData();
   if (reqId !== yrReqId || !S.root || !S.root.isConnected) return;
   const labels = years.map(y => String(BE(y)));
   const totals = years.map(y => round1(sum(CATEGORIES.map(c => catTotals[y][c] || 0))));
@@ -817,8 +870,6 @@ async function renderYearly() {
   ).join("");
 }
 
-const CAT_ABBR = { Recycle: "RC", Organic: "OG", "Non Recycle": "NR", "Infectious Waste": "IW", Hazard: "HZ" };
-
 function renderCategoryCards() {
   const { inc, out } = filt();
   const active = S.mode === "in" ? inc : out;
@@ -862,7 +913,7 @@ function renderCategoryCards() {
         const lastVal = lastM.items[it.id] || 0;
         const pc = round1(((lastVal - avg) / avg) * 100);
         const abs = Math.abs(pc);
-        const lbl = it.name.length > 22 ? it.name.slice(0, 22) + "…" : it.name;
+        const lbl = it.name;
         if (pc > 5) return `<div class="cc-trend-line"><span class="cc-ta cc-up">↑</span> ${lbl} เพิ่มขึ้น ${abs.toFixed(0)}% จากค่าเฉลี่ย</div>`;
         if (pc < -5) return `<div class="cc-trend-line"><span class="cc-ta cc-down">↓</span> ${lbl} ลดลง ${abs.toFixed(0)}% จากค่าเฉลี่ย</div>`;
         return `<div class="cc-trend-line"><span class="cc-ta cc-flat">→</span> ${lbl} คงที่</div>`;
@@ -884,7 +935,7 @@ function renderCategoryCards() {
     cards += `
     <div class="cat-card">
       <div class="cat-head">
-        <div class="cat-head-l"><div class="cat-badge" style="background:${CATEGORY_COLORS[cat]}">${CAT_ABBR[cat]}</div><div><div class="cat-name">${cat}</div><div class="cat-sub">${catPct}% ของขยะทั้งหมด</div></div></div>
+        <div class="cat-head-l"><div><div class="cat-badge" style="background:${CATEGORY_COLORS[cat]}">${cat}</div><div class="cat-sub">${catPct}% ของขยะทั้งหมด</div></div></div>
         <div class="cat-head-r"><div class="cat-total num" style="color:${CATEGORY_COLORS[cat]}">${fN(catTotal)}</div><div class="cat-total-sub">กก. ทั้งหมด &nbsp; <b style="color:var(--text)">${itemCount}</b> รายการ</div></div>
       </div>
       <div class="cat-body"><div class="cat-col"><div class="cc-col-title">รายการสูงสุด</div>${itemsHtml}</div><div class="cat-col">${trendHtml}</div></div>
@@ -1078,6 +1129,37 @@ async function doXls() {
 }
 async function doPpt() {
   const { inc, out } = filt(); const p = S.pOpts[S.pIdx];
-  try { await exportPptx({ incoming: inc, outgoing: out, start: p.s, end: p.e, label: p.l }, aggregateIncoming(inc), aggregateOutgoing(out)); showToast("ดาวน์โหลดไฟล์ PowerPoint แล้ว"); }
+  try {
+    const cw = cwIn(inc);
+    const total = round1(sum(Object.values(cw)));
+    const stackPeriods = getStackPeriods(inc, "in");
+    const bldCodes = [...new Set(inc.map(r => r.buildingCode))].sort();
+    const bldPeriods = getBldPeriods(inc);
+    const disposalPeriods = getDisposalPeriods(out);
+    const pcPeriods = getPCPeriods(inc, "in");
+    const yearly = await computeYearlyIncomingData();
+
+    const dash = {
+      bgLabel: S.bg === "all" ? "ทุกอาคาร" : S.bg,
+      bldLabel: S.bld === "all" ? "" : (S.bld.length > 2 ? S.bld : "อาคาร " + S.bld),
+      cw, total,
+      avgMonthly: yearlyMonthlyAvg("in"), avgWeekly: yearlyWeeklyAvg("in"),
+      stackLabels: stackPeriods.map(x => x.lbl),
+      stackCats: stackPeriods.map(x => x.cats),
+      bldCodes, bldColors: BLD_COL,
+      bldLabels: bldPeriods.map(x => x.lbl),
+      bldData: bldPeriods.map(x => x.b),
+      disposalLabels: disposalPeriods.map(x => x.lbl),
+      disposalData: disposalPeriods.map(x => x.d),
+      pcLabels: pcPeriods.map(x => x.lbl),
+      pcKpd: pcPeriods.map(pd => Math.round(pd.kg / EST_POP / pd.days * 100) / 100),
+      estPop: EST_POP,
+      yearlyLabels: yearly.years.map(y => String(BE(y))),
+      yearlyCatTotals: yearly.years.map(y => yearly.catTotals[y]),
+      catCards: computeCatCards(inc),
+    };
+    await exportPptx({ incoming: inc, outgoing: out, start: p.s, end: p.e, label: p.l }, aggregateIncoming(inc), aggregateOutgoing(out), dash);
+    showToast("ดาวน์โหลดไฟล์ PowerPoint แล้ว");
+  }
   catch (e) { showToast("Export PowerPoint ไม่สำเร็จ: " + e.message, true); }
 }

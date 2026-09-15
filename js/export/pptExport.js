@@ -7,12 +7,19 @@ const BLACK = "23211F";
 const MUTED = "6B6862";
 const LINE = "E7E4DE";
 const PANEL_BG = "FAFAF8";
-const BLD_COLOR = { A: "1E88E5", B: "9B9A8F", C: "43A047", NP1: "EF6C00", NP2: "D32F2F" };
+const STACK_CAT = ["Non Recycle", "Infectious Waste", "Recycle", "Organic", "Hazard"];
+const BLD_COLOR_FALLBACK = { A: "1E88E5", B: "9B9A8F", C: "43A047", NP1: "EF6C00", NP2: "D32F2F" };
 
 const hx = (c) => (c || "").replace("#", "");
 const fn = (n) => Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 1 });
 
-export async function exportPptx(data, inAgg, outAgg) {
+// dash is an optional object built by dashboard.js's doPpt() with the exact
+// period/building breakdown currently on screen (always incoming for the
+// main charts, outgoing for disposal — outgoing already has its own
+// disposal-method chart, so there's no separate ขาเข้า/ขาออก toggle here).
+// Without it (the simpler View/Export page caller) the deck falls back to
+// single-block summaries instead of period trends.
+export async function exportPptx(data, inAgg, outAgg, dash) {
   const PptxGenJS = window.PptxGenJS;
   if (!PptxGenJS) throw new Error("โหลดไลบรารี PowerPoint ไม่สำเร็จ");
 
@@ -37,10 +44,22 @@ export async function exportPptx(data, inAgg, outAgg) {
   const pctUsableOut = dispGrand > 0 ? round1((usableOut / dispGrand) * 1000) / 10 : 0;
 
   titleSlide(pptx, data);
-  kpiSlide(pptx, data, { totalIn, totalOut, pctUsableIn, pctUsableOut, buildings: inAgg.buildings.length, destinations: outAgg.destinations.length });
-  categorySlide(pptx, inCat, outCat);
-  if (inAgg.buildings.length > 0) buildingSlide(pptx, inAgg);
+
+  if (dash) kpiSlideDash(pptx, data, dash);
+  else kpiSlideFallback(pptx, data, { totalIn, totalOut, pctUsableIn, pctUsableOut, buildings: inAgg.buildings.length, destinations: outAgg.destinations.length });
+
+  if (dash && dash.stackLabels.length) trendSlide(pptx, dash);
+  else categorySlideFallback(pptx, inCat, outCat);
+
+  if (dash && dash.bldCodes.length) buildingTrendSlide(pptx, dash);
+  else if (inAgg.buildings.length > 0) buildingSlideFallback(pptx, inAgg);
+
   if (dispGrand > 0) disposalSlide(pptx, dispTotals, dispGrand, pctUsableOut);
+  if (dash && dash.disposalLabels.length) disposalTrendSlide(pptx, dash);
+  if (dash && dash.pcLabels.length) perCapitaSlide(pptx, dash);
+  if (dash && dash.yearlyLabels.length) yearlySlide(pptx, dash);
+  if (dash && dash.catCards) categoryOverviewSlides(pptx, dash.catCards);
+
   incomingTableSlide(pptx, inAgg);
   outgoingTableSlide(pptx, outAgg);
 
@@ -64,15 +83,37 @@ function titleSlide(pptx, data) {
 
 function statCard(slide, x, y, w, h, label, value, unit, accent, sub) {
   slide.addShape("roundRect", { x, y, w, h, rectRadius: 0.09, fill: { color: "FFFFFF" }, line: { color: LINE, width: 1 }, shadow: { type: "outer", color: "000000", opacity: 0.08, blur: 6, offset: 2, angle: 90 } });
-  slide.addShape("rect", { x: x + 0.22, y: y + 0.22, w: 0.12, h: 0.12, fill: { color: accent }, line: { type: "none" } });
-  slide.addText(label, { x: x + 0.22, y: y + 0.42, w: w - 0.44, h: 0.3, fontSize: 12, color: MUTED, fontFace: "Calibri", isTextBox: true });
-  slide.addText([{ text: value, options: { fontSize: 30, bold: true, color: accent } }, { text: " " + unit, options: { fontSize: 13, color: MUTED } }], {
-    x: x + 0.22, y: y + 0.72, w: w - 0.44, h: 0.55, fontFace: "Calibri", valign: "top", isTextBox: true,
+  slide.addShape("rect", { x: x + 0.2, y: y + 0.2, w: 0.12, h: 0.12, fill: { color: accent }, line: { type: "none" } });
+  slide.addText(label, { x: x + 0.2, y: y + 0.4, w: w - 0.4, h: 0.5, fontSize: 11, color: MUTED, fontFace: "Calibri", isTextBox: true });
+  slide.addText([{ text: value, options: { fontSize: 24, bold: true, color: accent } }, { text: " " + unit, options: { fontSize: 11, color: MUTED } }], {
+    x: x + 0.2, y: y + 0.85, w: w - 0.4, h: 0.5, fontFace: "Calibri", valign: "top", isTextBox: true,
   });
-  if (sub) slide.addText(sub, { x: x + 0.22, y: y + 1.28, w: w - 0.44, h: 0.3, fontSize: 11, color: MUTED, fontFace: "Calibri", isTextBox: true });
+  if (sub) slide.addText(sub, { x: x + 0.2, y: y + 1.32, w: w - 0.4, h: h - 1.42, fontSize: 9.5, color: MUTED, fontFace: "Calibri", isTextBox: true });
 }
 
-function kpiSlide(pptx, data, k) {
+/* ── KPI: 5 cards matching the Dashboard's KPI row exactly (always ขาเข้า) ── */
+function kpiSlideDash(pptx, data, dash) {
+  const s = pptx.addSlide();
+  const filterLbl = dash.bgLabel + (dash.bldLabel ? " / " + dash.bldLabel : "");
+  pageHeader(s, "สรุปภาพรวม (ขาเข้า)", `${data.label} · ${filterLbl}`);
+
+  const cw = dash.cw, total = dash.total;
+  const pct = (v) => total > 0 ? (v / total * 100).toFixed(1) : "0.0";
+  const ih = round1((cw["Infectious Waste"] || 0) + (cw.Hazard || 0));
+
+  const cardW = 2.25, gap = 0.22, y = 1.75, h = 2.05;
+  const x0 = 0.6;
+  const cards = [
+    { label: "ขยะทั้งหมด", val: fn(total), accent: hx(YELLOW), sub: `เฉลี่ยย้อนหลัง 1 ปี: ${fn(dash.avgMonthly)} กก./เดือน · ${fn(dash.avgWeekly)} กก./สัปดาห์` },
+    { label: "Recycle", val: fn(round1(cw.Recycle || 0)), accent: hx(CATEGORY_COLORS.Recycle), sub: pct(cw.Recycle || 0) + "%" },
+    { label: "Organic", val: fn(round1(cw.Organic || 0)), accent: hx(CATEGORY_COLORS.Organic), sub: pct(cw.Organic || 0) + "%" },
+    { label: "Non Recycle", val: fn(round1(cw["Non Recycle"] || 0)), accent: hx(CATEGORY_COLORS["Non Recycle"]), sub: pct(cw["Non Recycle"] || 0) + "%" },
+    { label: "Infectious + Hazard", val: fn(ih), accent: hx(CATEGORY_COLORS["Infectious Waste"]), sub: pct(ih) + "%" },
+  ];
+  cards.forEach((c, i) => statCard(s, x0 + i * (cardW + gap), y, cardW, h, c.label, c.val, "กก.", c.accent, c.sub));
+}
+
+function kpiSlideFallback(pptx, data, k) {
   const s = pptx.addSlide();
   pageHeader(s, "สรุปภาพรวม", data.label);
   const cardW = 2.9, gap = 0.28, y = 1.75, h = 1.7;
@@ -81,22 +122,57 @@ function kpiSlide(pptx, data, k) {
   statCard(s, x0 + (cardW + gap), y, cardW, h, "น้ำหนักขาออกรวม", fn(k.totalOut), "กก.", hx(BLACK), `${k.destinations} ปลายทาง`);
   statCard(s, x0 + 2 * (cardW + gap), y, cardW, h, "% รีไซเคิล+อินทรีย์ (ขาเข้า)", fn(k.pctUsableIn), "%", hx(CATEGORY_COLORS.Organic), "ของขยะขาเข้าทั้งหมด");
   statCard(s, x0 + 3 * (cardW + gap), y, cardW, h, "% กำจัดแบบใช้ประโยชน์ได้", fn(k.pctUsableOut), "%", hx(DISPOSAL_COLOR["ทำดิน/ปุ๋ย"]), "รีไซเคิล+RDF+หมัก+ทำดิน");
+}
 
-  s.addShape("roundRect", { x: 0.6, y: 3.75, w: 12.13, h: 1.35, rectRadius: 0.09, fill: { color: PANEL_BG }, line: { type: "none" } });
-  s.addText(
+/* ── แนวโน้มปริมาณขยะ (stacked bar per period, ขาเข้า) — mirrors Dashboard's
+   trend chart: same stacking order/colors, per-segment kg labels, and a
+   total-weight label above each bar (via an invisible line series) ── */
+function trendSlide(pptx, dash) {
+  const s = pptx.addSlide();
+  const filterLbl = dash.bgLabel + (dash.bldLabel ? " / " + dash.bldLabel : "");
+  pageHeader(s, "แนวโน้มปริมาณขยะ (ขาเข้า)", `น้ำหนักรวมแยกประเภท (กก.) · ${filterLbl}`);
+
+  const labels = dash.stackLabels;
+  const totals = dash.stackCats.map((c) => round1(sum(STACK_CAT.map((cat) => c[cat] || 0))));
+  const barSeries = STACK_CAT.map((cat) => ({
+    name: CATEGORY_LABELS_TH[cat] || cat,
+    labels,
+    values: dash.stackCats.map((c) => round1(c[cat] || 0)),
+  }));
+  const totalSeries = [{ name: "รวม", labels, values: totals }];
+
+  s.addChart(
     [
-      { text: "สรุป: ", options: { bold: true, color: BLACK } },
-      { text: `น้ำหนักขยะขาเข้ารวม ${fn(k.totalIn)} กก. และขาออกรวม ${fn(k.totalOut)} กก. ในช่วงที่เลือก — `, options: { color: BLACK } },
-      { text: `${fn(k.pctUsableIn)}%`, options: { bold: true, color: hx(CATEGORY_COLORS.Organic) } },
-      { text: " ของขยะขาเข้าเป็นรีไซเคิล/อินทรีย์ และ ", options: { color: BLACK } },
-      { text: `${fn(k.pctUsableOut)}%`, options: { bold: true, color: hx(DISPOSAL_COLOR["ทำดิน/ปุ๋ย"]) } },
-      { text: " ของขยะขาออกถูกกำจัดแบบใช้ประโยชน์ได้", options: { color: BLACK } },
+      {
+        type: pptx.ChartType.bar,
+        data: barSeries,
+        options: {
+          chartColors: STACK_CAT.map((c) => hx(CATEGORY_COLORS[c])),
+          showValue: true, dataLabelPosition: "ctr", dataLabelColor: "FFFFFF", dataLabelFontSize: 8.5, dataLabelFormatCode: "#,##0",
+        },
+      },
+      {
+        type: pptx.ChartType.line,
+        data: totalSeries,
+        options: {
+          chartColors: ["FFFFFF"], lineSize: 1, lineDataSymbol: "none",
+          showValue: true, dataLabelPosition: "t", dataLabelColor: BLACK, dataLabelFontSize: 11, dataLabelFontBold: true, dataLabelFormatCode: "#,##0",
+        },
+      },
     ],
-    { x: 0.95, y: 3.75, w: 11.5, h: 1.35, fontSize: 14, valign: "middle", fontFace: "Calibri", isTextBox: true }
+    {
+      x: 0.4, y: 1.7, w: 12.53, h: 5.2,
+      barDir: "col", barGrouping: "stacked",
+      showLegend: true, legendPos: "b", legendFontSize: 10,
+      catAxisLabelFontSize: 10, catAxisLabelColor: MUTED,
+      valAxisHidden: true,
+      valGridLine: { style: "none" }, catGridLine: { style: "none" },
+      plotArea: { fill: { color: "FFFFFF" } },
+    }
   );
 }
 
-function categorySlide(pptx, inCat, outCat) {
+function categorySlideFallback(pptx, inCat, outCat) {
   const s = pptx.addSlide();
   pageHeader(s, "น้ำหนักขยะแยกตามประเภท", "เปรียบเทียบขาเข้าและขาออก (กก.)");
 
@@ -124,13 +200,37 @@ function categorySlide(pptx, inCat, outCat) {
   });
 }
 
-function buildingSlide(pptx, inAgg) {
+/* ── เปรียบเทียบรายอาคาร (line chart per building, ขาเข้า) ── */
+function buildingTrendSlide(pptx, dash) {
+  const s = pptx.addSlide();
+  pageHeader(s, "เปรียบเทียบรายอาคาร (ขาเข้า)", "น้ำหนักรวมแต่ละอาคาร (กก.)");
+
+  const labels = dash.bldLabels;
+  const series = dash.bldCodes.map((b) => ({
+    name: "อาคาร " + b,
+    labels,
+    values: dash.bldData.map((d) => round1(d[b] || 0)),
+  }));
+
+  s.addChart(pptx.ChartType.line, series, {
+    x: 0.6, y: 1.6, w: 12.13, h: 5.3,
+    chartColors: dash.bldCodes.map((b) => hx((dash.bldColors && dash.bldColors[b]) || BLD_COLOR_FALLBACK[b] || "9B9A8F")),
+    showLegend: true, legendPos: "b", legendFontSize: 11,
+    lineDataSymbolSize: 6, lineSize: 2.5,
+    catAxisLabelFontSize: 11, catAxisLabelColor: MUTED,
+    valAxisLabelFontSize: 10, valAxisLabelColor: MUTED,
+    valGridLine: { color: LINE }, catGridLine: { style: "none" },
+    plotArea: { fill: { color: "FFFFFF" } },
+  });
+}
+
+function buildingSlideFallback(pptx, inAgg) {
   const s = pptx.addSlide();
   pageHeader(s, "เปรียบเทียบรายอาคาร (ขาเข้า)", "น้ำหนักรวมแต่ละอาคาร (กก.)");
 
   const labels = inAgg.buildings.map((b) => "อาคาร " + b);
   const values = inAgg.buildings.map((b) => round1(sum(CATEGORIES.map((c) => inAgg.categoryTotals[c]?.[b] || 0))));
-  const colors = inAgg.buildings.map((b) => BLD_COLOR[b] || "9B9A8F");
+  const colors = inAgg.buildings.map((b) => BLD_COLOR_FALLBACK[b] || "9B9A8F");
 
   s.addChart(pptx.ChartType.bar, [{ name: "น้ำหนัก", labels, values }], {
     x: 1.5, y: 1.7, w: 10.3, h: 5.3,
@@ -142,6 +242,7 @@ function buildingSlide(pptx, inAgg) {
   });
 }
 
+/* ── รูปแบบการกำจัด (donut, ขาออก) ── */
 function disposalSlide(pptx, dispTotals, dispGrand, pctUsable) {
   const s = pptx.addSlide();
   pageHeader(s, "รูปแบบการกำจัด (ขาออก)", "สัดส่วนน้ำหนักขยะแยกตามวิธีกำจัด");
@@ -170,6 +271,186 @@ function disposalSlide(pptx, dispTotals, dispGrand, pctUsable) {
     s.addText(`${fn(v)} กก. · ${pct}%`, { x: 10.2, y: ly, w: 2.5, h: 0.28, fontSize: 12, color: MUTED, fontFace: "Calibri", align: "right", isTextBox: true });
     ly += 0.4;
   }
+}
+
+/* ── แนวโน้มรูปแบบการกำจัด (stacked bar per period, ขาออก) ── */
+function disposalTrendSlide(pptx, dash) {
+  const s = pptx.addSlide();
+  pageHeader(s, "แนวโน้มรูปแบบการกำจัด (ขาออก)", "ปริมาณขยะขาออกแยกตามวิธีกำจัด (กก.)");
+
+  const labels = dash.disposalLabels;
+  const series = DISPOSAL_ORDER.map((g) => ({
+    name: g,
+    labels,
+    values: dash.disposalData.map((d) => round1(d[g] || 0)),
+  }));
+
+  s.addChart(pptx.ChartType.bar, series, {
+    x: 0.4, y: 1.65, w: 12.53, h: 4.5,
+    barDir: "col", barGrouping: "stacked",
+    chartColors: DISPOSAL_ORDER.map((g) => hx(DISPOSAL_COLOR[g])),
+    showLegend: true, legendPos: "b", legendFontSize: 10,
+    showValue: true, dataLabelPosition: "ctr", dataLabelColor: BLACK, dataLabelFontSize: 7.5, dataLabelFormatCode: "#,##0",
+    catAxisLabelFontSize: 10, catAxisLabelColor: MUTED,
+    valAxisHidden: true,
+    valGridLine: { style: "none" }, catGridLine: { style: "none" },
+    plotArea: { fill: { color: "FFFFFF" } },
+  });
+
+  const totalsPer = dash.disposalData.map((d) => round1(sum(DISPOSAL_ORDER.map((g) => d[g] || 0))));
+  const usablePer = dash.disposalData.map((d) => round1(sum(DISPOSAL_ORDER.filter((g) => USABLE_GROUPS.has(g)).map((g) => d[g] || 0))));
+  const pctTxt = labels.map((l, i) => (totalsPer[i] > 0 ? `${l}: ${(usablePer[i] / totalsPer[i] * 100).toFixed(0)}% ใช้ได้` : `${l}: -`)).join("    ");
+  s.addText("% ใช้ได้ต่อช่วง — " + pctTxt, { x: 0.4, y: 6.3, w: 12.53, h: 0.6, fontSize: 9.5, color: MUTED, fontFace: "Calibri", isTextBox: true });
+}
+
+/* ── ผู้ใช้อาคาร vs ขยะต่อคน (line, ขาเข้า) ── */
+function perCapitaSlide(pptx, dash) {
+  const s = pptx.addSlide();
+  pageHeader(s, "ผู้ใช้อาคาร vs ขยะต่อคน (ขาเข้า)", `กก./คน/วัน (ประมาณจากผู้ใช้ ~${dash.estPop || 900} คน/วัน)`);
+
+  s.addChart(pptx.ChartType.line, [{ name: "กก./คน/วัน", labels: dash.pcLabels, values: dash.pcKpd }], {
+    x: 1.2, y: 1.7, w: 10.93, h: 5.3,
+    chartColors: [hx(YELLOW)],
+    showLegend: false,
+    lineDataSymbolSize: 6, lineSize: 2.5,
+    showValue: true, dataLabelPosition: "t", dataLabelColor: BLACK, dataLabelFontSize: 10,
+    catAxisLabelFontSize: 11, catAxisLabelColor: MUTED,
+    valAxisLabelFontSize: 10, valAxisLabelColor: MUTED,
+    valGridLine: { color: LINE }, catGridLine: { style: "none" },
+    plotArea: { fill: { color: "FFFFFF" } },
+  });
+}
+
+/* ── เปรียบเทียบรายปี (stacked bar per year, ขาเข้า) ── */
+function yearlySlide(pptx, dash) {
+  const s = pptx.addSlide();
+  pageHeader(s, "เปรียบเทียบรายปี (ขาเข้า)", "ปริมาณขยะรวมแต่ละปี แยกตามประเภท (กก.)");
+
+  const labels = dash.yearlyLabels;
+  const totals = dash.yearlyCatTotals.map((cw) => round1(sum(CATEGORIES.map((c) => cw[c] || 0))));
+  const barSeries = CATEGORIES.map((cat) => ({
+    name: CATEGORY_LABELS_TH[cat] || cat,
+    labels,
+    values: dash.yearlyCatTotals.map((cw) => round1(cw[cat] || 0)),
+  }));
+  const totalSeries = [{ name: "รวม", labels, values: totals }];
+
+  s.addChart(
+    [
+      {
+        type: pptx.ChartType.bar,
+        data: barSeries,
+        options: {
+          chartColors: CATEGORIES.map((c) => hx(CATEGORY_COLORS[c])),
+          showValue: true, dataLabelPosition: "ctr", dataLabelColor: "FFFFFF", dataLabelFontSize: 10, dataLabelFormatCode: "#,##0",
+        },
+      },
+      {
+        type: pptx.ChartType.line,
+        data: totalSeries,
+        options: {
+          chartColors: ["FFFFFF"], lineSize: 1, lineDataSymbol: "none",
+          showValue: true, dataLabelPosition: "t", dataLabelColor: BLACK, dataLabelFontSize: 12, dataLabelFontBold: true, dataLabelFormatCode: "#,##0",
+        },
+      },
+    ],
+    {
+      x: 1.0, y: 1.6, w: 11.33, h: 5.3,
+      barDir: "col", barGrouping: "stacked",
+      showLegend: true, legendPos: "b", legendFontSize: 11,
+      catAxisLabelFontSize: 12, catAxisLabelColor: MUTED,
+      valAxisHidden: true,
+      valGridLine: { style: "none" }, catGridLine: { style: "none" },
+      plotArea: { fill: { color: "FFFFFF" } },
+    }
+  );
+}
+
+/* ── category overview slides (ขาเข้า): the same "รายการสูงสุด" and
+   "แนวโน้ม (เฉลี่ยปี vs เดือนล่าสุด)" data as the Dashboard's category
+   cards, laid out the same way Dashboard does it — the avg-vs-last-month
+   comparison sits below the trend lines behind a divider, not squeezed
+   next to the header — which only leaves room for 2 categories per slide
+   at a readable size ── */
+function categoryOverviewSlides(pptx, cards) {
+  const perSlide = 2;
+  const pages = [];
+  for (let p = 0; p < cards.length; p += perSlide) pages.push(cards.slice(p, p + perSlide));
+
+  pages.forEach((chunk, pageIdx) => {
+    const s = pptx.addSlide();
+    const suffix = pages.length > 1 ? ` (${pageIdx + 1}/${pages.length})` : "";
+    pageHeader(s, "รายละเอียดตามหมวดหมู่ (ขาเข้า)" + suffix, "รายการสูงสุด และแนวโน้ม (เฉลี่ยปี vs เดือนล่าสุด) แยกตามหมวดหมู่");
+
+    const x0 = 0.4, fullW = 12.53, rowH = 2.9, gap = 0.1, y0 = 1.4;
+    chunk.forEach((card, i) => {
+      const y = y0 + i * (rowH + gap);
+      const color = hx(CATEGORY_COLORS[card.cat]);
+
+      s.addShape("roundRect", { x: x0, y, w: fullW, h: rowH, rectRadius: 0.08, fill: { color: i % 2 === 0 ? "FFFFFF" : PANEL_BG }, line: { color: LINE, width: 0.75 } });
+
+      // header: category name as a colored pill + total
+      s.addShape("roundRect", { x: x0 + 0.25, y: y + 0.18, w: 2.6, h: 0.46, rectRadius: 0.23, fill: { color }, line: { type: "none" } });
+      s.addText(card.cat, { x: x0 + 0.25, y: y + 0.18, w: 2.6, h: 0.46, align: "center", valign: "middle", fontSize: 15, bold: true, color: "FFFFFF", fontFace: "Calibri", isTextBox: true });
+      s.addText([{ text: fn(card.catTotal), options: { fontSize: 22, bold: true, color } }, { text: " กก.", options: { fontSize: 11.5, color: MUTED } }], {
+        x: x0 + fullW - 3.4, y: y + 0.16, w: 3.2, h: 0.42, align: "right", fontFace: "Calibri", isTextBox: true,
+      });
+      s.addText(`${fn(card.catPct)}% ของขยะขาเข้าทั้งหมด · ${card.itemCount} รายการ`, { x: x0 + 0.25, y: y + 0.72, w: 5.0, h: 0.24, fontSize: 11, color: MUTED, fontFace: "Calibri", isTextBox: true });
+
+      // two columns: รายการสูงสุด | แนวโน้ม
+      const itemsX = x0 + 0.4, colW = fullW / 2 - 0.55;
+      const trendX = x0 + fullW / 2 + 0.15;
+      const labelY = y + 1.08, bodyY = y + 1.34;
+      s.addText("รายการสูงสุด", { x: itemsX, y: labelY, w: colW, h: 0.24, fontSize: 11.5, bold: true, color: BLACK, fontFace: "Calibri", isTextBox: true });
+      s.addText("แนวโน้ม (เฉลี่ยปี vs เดือนล่าสุด)", { x: trendX, y: labelY, w: colW, h: 0.24, fontSize: 11.5, bold: true, color: BLACK, fontFace: "Calibri", isTextBox: true });
+
+      if (card.items.length === 0) {
+        s.addText("ไม่มีข้อมูล", { x: itemsX, y: bodyY, w: colW, h: 0.28, fontSize: 11, color: MUTED, fontFace: "Calibri", isTextBox: true });
+      } else {
+        const maxKg = card.items[0].kg || 1;
+        let iy = bodyY;
+        for (const it of card.items) {
+          s.addText(it.name, { x: itemsX, y: iy, w: colW * 0.6, h: 0.24, fontSize: 11, color: BLACK, fontFace: "Calibri", isTextBox: true, valign: "top" });
+          s.addText(`${fn(it.kg)} กก. ${fn(it.pct)}%`, { x: itemsX + colW * 0.6, y: iy, w: colW * 0.4, h: 0.24, align: "right", fontSize: 10.5, color: MUTED, fontFace: "Calibri", isTextBox: true });
+          const bw = Math.max((it.kg / maxKg) * colW, 0.08);
+          s.addShape("roundRect", { x: itemsX, y: iy + 0.25, w: colW, h: 0.09, rectRadius: 0.025, fill: { color: "F0EEE9" }, line: { type: "none" } });
+          s.addShape("roundRect", { x: itemsX, y: iy + 0.25, w: bw, h: 0.09, rectRadius: 0.025, fill: { color }, line: { type: "none" } });
+          iy += 0.48;
+        }
+      }
+
+      if (card.trendLines.length === 0) {
+        s.addText("ต้องมีข้อมูลอย่างน้อย 2 เดือน", { x: trendX, y: bodyY, w: colW, h: 0.28, fontSize: 11, color: MUTED, fontFace: "Calibri", isTextBox: true });
+      } else {
+        let ty = bodyY;
+        for (const t of card.trendLines) {
+          const up = t.pc > 5, down = t.pc < -5;
+          const arrow = up ? "▲" : down ? "▼" : "→";
+          const clr = up ? "D32F2F" : down ? hx(CATEGORY_COLORS.Organic) : MUTED;
+          const detail = up || down ? `${t.name} ${t.pc > 0 ? "+" : ""}${fn(t.pc)}%` : `${t.name} คงที่`;
+          s.addText(
+            [{ text: arrow + " ", options: { color: clr, bold: true } }, { text: detail, options: { color: BLACK } }],
+            { x: trendX, y: ty, w: colW, h: 0.3, fontSize: 11, fontFace: "Calibri", isTextBox: true, valign: "top" }
+          );
+          ty += 0.29;
+        }
+
+        // avg-vs-last-month comparison, below the trend lines behind a divider (matches Dashboard's .cc-trend-cmp)
+        const cmpY = ty + 0.12;
+        s.addShape("line", { x: trendX, y: cmpY, w: colW, h: 0.001, line: { color: LINE, width: 0.75 } });
+        const catUp = card.catCh > 0, catDown = card.catCh < 0;
+        const cmpArrow = catUp ? "▲" : catDown ? "▼" : "→";
+        const cmpClr = catUp ? "D32F2F" : catDown ? hx(CATEGORY_COLORS.Organic) : MUTED;
+        s.addText(
+          [
+            { text: `เฉลี่ย ${fn(card.catAvg)} กก./เดือน → ${card.mLbl} ${fn(card.lastCatKg)} กก.  `, options: { color: MUTED } },
+            { text: `${cmpArrow} ${card.catCh > 0 ? "+" : ""}${fn(card.catCh)}%`, options: { color: cmpClr, bold: true } },
+          ],
+          { x: trendX, y: cmpY + 0.08, w: colW, h: 0.26, fontSize: 11, fontFace: "Calibri", isTextBox: true }
+        );
+      }
+    });
+  });
 }
 
 function zebra(i) {

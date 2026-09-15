@@ -489,12 +489,11 @@ table.data tr:hover { background: #FAFAF7; }
 }
 .cat-head-l { display: flex; align-items: center; gap: 10px; }
 .cat-badge {
-  width: 36px; height: 36px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 500; font-size: 12px; color: #fff; font-family: 'DM Sans','Sarabun';
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 7px 18px; border-radius: 999px;
+  font-weight: 700; font-size: 15px; color: #fff; font-family: 'DM Sans','Sarabun';
 }
-.cat-name { font-weight: 600; font-size: 15px; }
-.cat-sub { font-size: 12px; color: var(--text-3); }
+.cat-sub { font-size: 12px; color: var(--text-3); margin-top: 6px; }
 .cat-head-r { text-align: right; }
 .cat-total { font-size: 22px; font-weight: 700; }
 .cat-total-sub { font-size: 11px; color: var(--text-3); }
