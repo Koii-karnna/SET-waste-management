@@ -101,7 +101,9 @@
         if (raw == null || raw === "") return null;
         if (raw instanceof Date) {
           if (isNaN(raw.getTime())) return null;
-          return fmtISO(raw.getFullYear(), raw.getMonth()+1, raw.getDate());
+          let y = raw.getFullYear();
+          if (y >= 2400) y -= 543;
+          return fmtISO(y, raw.getMonth()+1, raw.getDate());
         }
         if (typeof raw === "number") {
           const dt = XLSX.SSF.parse_date_code(raw);

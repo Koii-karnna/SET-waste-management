@@ -3,6 +3,7 @@ import {
   CATEGORY_COLORS, BUILDINGS, OTHER_ITEM_ID
 } from "../data/wasteItems.js";
 import { queryIncomingRange, queryOutgoingRange } from "../db.js";
+import { DISPOSAL_ORDER, DISPOSAL_COLOR, USABLE_GROUPS, disposalGroup } from "../data/disposal.js";
 import { todayISO, parseISO, toISO, addDays, weekRange, round1, sum } from "../utils.js";
 import { showToast } from "../main.js";
 import { getCurrentRole } from "../auth.js";
@@ -23,21 +24,6 @@ const BLD_COL = { A: "#1E88E5", B: "#9B9A8F", C: "#43A047", NP1: "#EF6C00", NP2:
 const EST_POP = 900;
 const NR_TARGET = 10;
 
-const DISPOSAL_MAP = {
-  "รีไซเคิล": "รีไซเคิล", "เผา RDF": "เผา RDF",
-  "หมัก/ทำอาหารปลา": "หมัก/อาหารปลา", "หมักปุ๋ย / น้ำหมัก": "หมัก/อาหารปลา",
-  "หมัก/ทำอาหารปลา/ทำดิน/ปุ๋ย": "หมัก/อาหารปลา",
-  "ทำดิน/ปุ๋ย": "ทำดิน/ปุ๋ย",
-  "เผาทำลาย": "เผาทำลาย"
-};
-const DISPOSAL_ORDER = ["เผา RDF", "รีไซเคิล", "หมัก/อาหารปลา", "ทำดิน/ปุ๋ย", "เผาทำลาย"];
-const DISPOSAL_COLOR = { "เผา RDF": "#90CAF9", "รีไซเคิล": "#FFE082", "หมัก/อาหารปลา": "#A5D6A7", "ทำดิน/ปุ๋ย": "#4CAF50", "เผาทำลาย": "#EF9A9A" };
-const USABLE_GROUPS = new Set(["รีไซเคิล", "เผา RDF", "หมัก/อาหารปลา", "ทำดิน/ปุ๋ย"]);
-
-function disposalGroup(r) {
-  if (r.destination === "SCIeco") return "เผา RDF";
-  return DISPOSAL_MAP[r.disposalMethod] || null;
-}
 
 let S = { ch: {} };
 function init() {
@@ -368,7 +354,9 @@ function filt() {
   let inc = S.inD;
   if (S.bg !== "all") inc = inc.filter(r => r.buildingGroup === S.bg);
   if (S.bld !== "all") inc = inc.filter(r => r.buildingCode === S.bld);
-  return { inc, out: S.outD };
+  let out = S.outD;
+  if (S.bg !== "all") out = out.filter(r => r.buildingGroup === S.bg);
+  return { inc, out };
 }
 
 function cwIn(recs) {
@@ -388,10 +376,8 @@ function cwOut(recs) {
 function yearlyTotal() {
   if (!S.histS) return 0;
   let recs = (S.mode === "in" ? S.allIn : S.allOut).filter(r => r.date >= S.histS && r.date <= S.histE);
-  if (S.mode === "in") {
-    if (S.bg !== "all") recs = recs.filter(r => r.buildingGroup === S.bg);
-    if (S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
-  }
+  if (S.bg !== "all") recs = recs.filter(r => r.buildingGroup === S.bg);
+  if (S.mode === "in" && S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
   const cw = S.mode === "in" ? cwIn(recs) : cwOut(recs);
   return sum(Object.values(cw));
 }
@@ -421,8 +407,8 @@ function renderAll() {
   renderKPI(cw, total);
   renderStack(getStackPeriods(active, S.mode));
   S.mode === "in" ? renderBld(getBldPeriods(inc), inc) : renderBld([], []);
-  renderDonut();
-  renderDisposalTrend();
+  renderDonut(out);
+  renderDisposalTrend(out);
   renderPC(active);
   renderYearly();
   renderCategoryCards();
@@ -540,12 +526,12 @@ function renderBld(data, recs) {
   });
 }
 
-function renderDonut() {
+function renderDonut(out) {
   const p = S.pOpts[S.pIdx];
   S.root.querySelector("#dh").textContent = p?.l || "";
 
   const groupW = {}; DISPOSAL_ORDER.forEach(g => groupW[g] = 0);
-  for (const r of S.outD) { const g = disposalGroup(r); if (g) groupW[g] += r.weightKg || 0; }
+  for (const r of out) { const g = disposalGroup(r); if (g) groupW[g] += r.weightKg || 0; }
   const data = DISPOSAL_ORDER.map(g => round1(groupW[g]));
   const cols = DISPOSAL_ORDER.map(g => DISPOSAL_COLOR[g]);
   const total = round1(sum(data));
@@ -577,9 +563,9 @@ function renderDonut() {
   }).join("") + `<div class="donut-legend-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="font-weight:600">% ใช้ได้ (รีไซเคิล+RDF+หมัก+ทำดิน)</span><span class="num" style="font-weight:700;color:#43A047">${usablePct.toFixed(1)}%</span></div>`;
 }
 
-function getDisposalPeriods() {
+function getDisposalPeriods(out) {
   const byK = {};
-  for (const r of S.outD) {
+  for (const r of out) {
     let k, _s, _e;
     if (S.pType === "weekly") { k = r.date; }
     else if (S.pType === "monthly" && S.pIdx > 0) { const wr = weekRange(r.date); k = wr.start; _s = wr.start; _e = wr.end; }
@@ -601,9 +587,9 @@ function getDisposalPeriods() {
   });
 }
 
-function renderDisposalTrend() {
+function renderDisposalTrend(out) {
   const cv = S.root.querySelector("#cDT"); if (!cv) return;
-  const periods = getDisposalPeriods();
+  const periods = getDisposalPeriods(out);
   if (!periods.length) { S.ch.dt = new Chart(cv, { type: "bar", data: { labels: [], datasets: [] }, options: { responsive: true, maintainAspectRatio: false, plugins: { datalabels: { display: false } } } }); return; }
 
   const labels = periods.map(p => p.lbl);

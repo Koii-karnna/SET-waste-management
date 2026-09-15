@@ -218,6 +218,8 @@ function fillTable(root, record) {
 let pendingRows = [];
 let existingRows = [];
 
+let outBuildingGroup = "CMC";
+
 function renderOutgoingForm(root) {
   pendingRows = [];
   existingRows = [];
@@ -229,6 +231,13 @@ function renderOutgoingForm(root) {
           <input type="date" id="out-date" value="${todayISO()}" />
         </div>
         <div class="field">
+          <label>กลุ่มอาคาร</label>
+          <div class="chip-group" id="out-group">
+            <button type="button" class="chip ${outBuildingGroup === "CMC" ? "active" : ""}" data-group="CMC">CMC</button>
+            <button type="button" class="chip ${outBuildingGroup === "NP" ? "active" : ""}" data-group="NP">NP</button>
+          </div>
+        </div>
+        <div class="field">
           <button class="btn" id="out-load">โหลดข้อมูลเดิม</button>
         </div>
       </div>
@@ -236,7 +245,7 @@ function renderOutgoingForm(root) {
         <h4 style="margin:12px 0 6px">รายการที่บันทึกแล้ว</h4>
         <div class="table-wrap">
           <table class="data-table" id="out-existing-table">
-            <thead><tr><th>รายการ</th><th>น้ำหนัก</th><th>ปลายทาง</th><th>วิธีกำจัด</th><th></th></tr></thead>
+            <thead><tr><th>กลุ่มอาคาร</th><th>รายการ</th><th>น้ำหนัก</th><th>ปลายทาง</th><th>วิธีกำจัด</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -293,7 +302,7 @@ function renderOutgoingForm(root) {
       </div>
       <div class="table-wrap">
         <table class="data-table" id="out-pending-table">
-          <thead><tr><th>รายการ</th><th>น้ำหนัก</th><th>ปลายทาง</th><th></th></tr></thead>
+          <thead><tr><th>กลุ่มอาคาร</th><th>รายการ</th><th>น้ำหนัก</th><th>ปลายทาง</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -319,6 +328,13 @@ function renderOutgoingForm(root) {
     }
   }
   applyDestinationDefaults(destSelect.value);
+
+  root.querySelector("#out-group").addEventListener("click", (e) => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    outBuildingGroup = btn.dataset.group;
+    [...root.querySelectorAll("#out-group .chip")].forEach((c) => c.classList.toggle("active", c === btn));
+  });
 
   destSelect.addEventListener("change", () => {
     if (destSelect.value === "__new__") {
@@ -360,6 +376,7 @@ function renderOutgoingForm(root) {
 
     const item = WASTE_ITEMS.find((w) => w.id === itemId);
     pendingRows.push({
+      buildingGroup: outBuildingGroup,
       itemId,
       itemLabel: item.nameTh,
       category: item.category,
@@ -389,6 +406,7 @@ function renderOutgoingForm(root) {
         await addOutgoing(
           {
             date,
+            buildingGroup: row.buildingGroup,
             itemId: row.itemId,
             category: row.category,
             weightKg: row.weightKg,
@@ -428,6 +446,7 @@ function renderExistingTable(root) {
   const itemMap = Object.fromEntries(WASTE_ITEMS.map(it => [it.id, it.nameTh]));
   tbody.innerHTML = existingRows
     .map((r) => `<tr data-id="${r.id}">
+        <td>${r.buildingGroup || "-"}</td>
         <td>${itemMap[r.itemId] || r.itemId || "-"}</td>
         <td><input type="number" min="0" step="0.1" class="ex-weight" value="${r.weightKg}" style="width:80px" /></td>
         <td>${r.destination || "-"}</td>
@@ -480,12 +499,13 @@ function renderExistingTable(root) {
 function renderPendingTable(root) {
   const tbody = root.querySelector("#out-pending-table tbody");
   if (pendingRows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="muted">ยังไม่มีรายการ</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">ยังไม่มีรายการ</td></tr>`;
     return;
   }
   tbody.innerHTML = pendingRows
     .map(
       (r, i) => `<tr>
+        <td>${r.buildingGroup}</td>
         <td>${r.itemLabel}</td>
         <td>${r.weightKg} กก.</td>
         <td>${r.destination}</td>

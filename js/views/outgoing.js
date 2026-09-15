@@ -25,7 +25,7 @@ const TAG_CLS = {
 let S = {};
 function init() {
   return {
-    dest: "all", disposal: "all", search: "",
+    bg: "all", dest: "all", disposal: "all", search: "",
     pIdx: 0, pOpts: [], page: 0,
     raw: [], filtered: [],
     root: null,
@@ -49,6 +49,7 @@ function prepare(records) {
     const item = WASTE_ITEM_BY_ID[r.itemId];
     return {
       date: r.date,
+      buildingGroup: r.buildingGroup || "-",
       category: r.category || "Non Recycle",
       itemName: item ? item.nameTh : `#${r.itemId}`,
       weight: round1(r.weightKg || 0),
@@ -61,6 +62,7 @@ function prepare(records) {
 
 function applyFilters() {
   let r = S.rows;
+  if (S.bg !== "all") r = r.filter(x => x.buildingGroup === S.bg);
   if (S.dest !== "all") r = r.filter(x => x.destination === S.dest);
   if (S.disposal !== "all") r = r.filter(x => x.disposal === S.disposal);
   if (S.search) {
@@ -87,6 +89,7 @@ function buildHTML() {
   return `
     <div class="controls" id="out-ctrl">
       <select class="sel" id="out-period">${pSel}</select>
+      <select class="sel" id="out-bg"><option value="all">ทุกกลุ่มอาคาร</option><option value="CMC">CMC</option><option value="NP">NP</option></select>
       <select class="sel" id="out-dest"><option value="all">ปลายทางทั้งหมด</option>${destSel}</select>
       <select class="sel" id="out-disposal"><option value="all">วิธีกำจัดทั้งหมด</option>${dispSel}</select>
       <span class="spacer"></span>
@@ -96,7 +99,7 @@ function buildHTML() {
     <div class="panel" id="out-panel">
       <div class="table-wrap"><table class="data" id="out-table">
         <thead><tr>
-          <th>วันที่</th><th>ประเภท</th><th>รายการ</th>
+          <th>วันที่</th><th>กลุ่มอาคาร</th><th>ประเภท</th><th>รายการ</th>
           <th style="text-align:right">น้ำหนัก (กก.)</th><th>ปลายทาง</th><th>การกำจัด</th><th>ประเภทรถ</th>
         </tr></thead>
         <tbody id="out-tbody"></tbody>
@@ -110,6 +113,9 @@ function listen() {
   root.querySelector("#out-period").addEventListener("change", e => {
     S.pIdx = +e.target.value;
     load();
+  });
+  root.querySelector("#out-bg").addEventListener("change", e => {
+    S.bg = e.target.value; S.page = 0; render();
   });
   root.querySelector("#out-dest").addEventListener("change", e => {
     S.dest = e.target.value; S.page = 0; render();
@@ -167,11 +173,12 @@ function renderTable(rows) {
   const slice = rows.slice(start, start + PER_PAGE);
   const tbody = S.root.querySelector("#out-tbody");
   if (slice.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">ไม่มีข้อมูล</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">ไม่มีข้อมูล</td></tr>`;
     return;
   }
   tbody.innerHTML = slice.map(r => `<tr>
     <td class="num">${fmtDate(r.date)}</td>
+    <td>${r.buildingGroup}</td>
     <td><span class="tag ${TAG_CLS[r.category] || ""}">${CATEGORY_LABELS_TH[r.category] || r.category}</span></td>
     <td>${r.itemName}</td>
     <td style="text-align:right" class="num">${fN(r.weight)}</td>
