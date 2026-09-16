@@ -1,4 +1,4 @@
-import { onAuthChange, login, logout, authErrorMessage, getCurrentRole } from "./auth.js";
+import { onAuthChange, login, logout, authErrorMessage, resetPassword, resetErrorMessage, getCurrentRole } from "./auth.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderDataEntry } from "./views/dataEntry.js";
 import { renderIncoming } from "./views/incoming.js";
@@ -9,6 +9,8 @@ const loginScreen = document.getElementById("login-screen");
 const mainScreen = document.getElementById("main-screen");
 const loginForm = document.getElementById("login-form");
 const loginError = document.getElementById("login-error");
+const loginInfo = document.getElementById("login-info");
+const forgotPasswordBtn = document.getElementById("forgot-password-btn");
 const userEmailEl = document.getElementById("user-email");
 const logoutBtn = document.getElementById("logout-btn");
 const tabbar = document.getElementById("tabbar");
@@ -27,6 +29,7 @@ let activeTab = "dashboard";
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   loginError.textContent = "";
+  loginInfo.hidden = true;
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
   const submitBtn = loginForm.querySelector("button[type=submit]");
@@ -37,6 +40,26 @@ loginForm.addEventListener("submit", async (e) => {
     loginError.textContent = authErrorMessage(err);
   } finally {
     submitBtn.disabled = false;
+  }
+});
+
+forgotPasswordBtn.addEventListener("click", async () => {
+  loginError.textContent = "";
+  loginInfo.hidden = true;
+  const email = document.getElementById("login-email").value.trim();
+  if (!email) {
+    loginError.textContent = "กรุณากรอกอีเมลก่อนกดลืมรหัสผ่าน";
+    return;
+  }
+  forgotPasswordBtn.disabled = true;
+  try {
+    await resetPassword(email);
+    loginInfo.textContent = `ส่งลิงก์รีเซ็ตรหัสผ่านไปที่ ${email} แล้ว กรุณาตรวจสอบอีเมล (รวมถึงกล่อง Junk/Spam)`;
+    loginInfo.hidden = false;
+  } catch (err) {
+    loginError.textContent = resetErrorMessage(err);
+  } finally {
+    forgotPasswordBtn.disabled = false;
   }
 });
 

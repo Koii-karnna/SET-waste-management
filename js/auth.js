@@ -1,4 +1,4 @@
-import { auth, db, collection, query, where, getDocs, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "./firebase-init.js";
+import { auth, db, collection, query, where, getDocs, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "./firebase-init.js";
 
 let currentUser = null;
 let currentRole = "viewer";
@@ -47,6 +47,10 @@ export async function logout() {
   await signOut(auth);
 }
 
+export async function resetPassword(email) {
+  await sendPasswordResetEmail(auth, email);
+}
+
 export function authErrorMessage(err) {
   const code = err && err.code;
   switch (code) {
@@ -60,5 +64,19 @@ export function authErrorMessage(err) {
       return "ลองผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่";
     default:
       return "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
+  }
+}
+
+export function resetErrorMessage(err) {
+  const code = err && err.code;
+  switch (code) {
+    case "auth/invalid-email":
+      return "รูปแบบอีเมลไม่ถูกต้อง";
+    case "auth/user-not-found":
+      return "ไม่พบบัญชีที่ใช้อีเมลนี้";
+    case "auth/too-many-requests":
+      return "ลองหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่";
+    default:
+      return "ส่งลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
   }
 }

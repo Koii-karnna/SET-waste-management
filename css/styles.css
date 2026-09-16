@@ -781,6 +781,25 @@ table.data-table input[type="number"] { width: 90px; }
   font-size: 13px;
   min-height: 1.2em;
 }
+.login-info {
+  color: var(--success);
+  background: var(--organic-bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  align-self: center;
+}
+.link-btn:hover { color: var(--accent-dark); }
 
 /* Password toggle */
 .pw-wrap {
