@@ -422,24 +422,37 @@ table.data tr:hover { background: #FAFAF7; }
   margin-bottom: 14px;
 }
 
-/* Goal Card */
-.goal-card {
+/* Goal Chart Card */
+.goal-chart-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 4px solid #1E88E5;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 20px 24px;
   margin-bottom: 14px;
 }
-.goal-card.pass { background: #E8F5E9; }
-.goal-card.fail { background: #FDECEA; }
-.goal-header { font-weight: 600; font-size: 15px; margin-bottom: 14px; }
-.goal-body { display: flex; gap: 24px; align-items: flex-start; }
-.goal-main { flex: 1; }
-.goal-spark { flex-shrink: 0; }
-.goal-progress { height: 14px; background: #e0e0e0; border-radius: 7px; overflow: hidden; margin-bottom: 12px; }
-.goal-bar { height: 100%; border-radius: 7px; transition: width 0.5s; }
+.goal-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.goal-scope-pill {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  color: var(--text-2); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px 14px;
+}
+.goal-legend { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-2); flex-wrap: wrap; }
+.goal-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.goal-legend .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.goal-legend .dot.pass { background: var(--success); }
+.goal-legend .dot.fail { background: var(--danger); }
+.goal-legend .dash { width: 16px; height: 0; border-top: 2px dashed var(--danger); display: inline-block; }
+.goal-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.goal-sub { font-size: 13px; color: var(--text-2); margin-bottom: 18px; }
+.goal-chart-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.goal-bld-name { font-size: 15px; font-weight: 700; }
+.goal-exceed { font-size: 13px; margin-top: 4px; font-weight: 600; }
+.goal-exceed.pass { color: var(--success); }
+.goal-exceed.fail { color: var(--danger); }
+.goal-avg { text-align: right; }
+.goal-avg-label { font-size: 12px; color: var(--text-3); margin-bottom: 2px; }
+.goal-avg-val { font-size: 26px; font-weight: 700; font-family: 'DM Sans'; }
 
 /* Insight Boxes (anomaly / forecast) */
 .insight-box {
@@ -521,7 +534,7 @@ table.data tr:hover { background: #FAFAF7; }
 }
 
 @media (max-width: 900px) { .insight-grid { grid-template-columns: 1fr; } .cat-body { grid-template-columns: 1fr; } .cat-col + .cat-col { border-left: none; border-top: 1px solid var(--border); } }
-@media (max-width: 600px) { .goal-body { flex-direction: column; } .goal-spark { width: 100%; } }
+@media (max-width: 600px) { .goal-top { flex-direction: column; align-items: flex-start; } .goal-chart-head { flex-direction: column; gap: 8px; } .goal-avg { text-align: left; } }
 
 /* ---------- Data Entry (legacy card style) ---------- */
 .card {

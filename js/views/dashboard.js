@@ -982,63 +982,94 @@ function renderInsight() {
   renderAnomalyCards(mStats);
 }
 
+const GOAL_PASS = "#43A047", GOAL_FAIL = "#D32F2F";
+
 function renderGoal(mStats) {
   const container = S.root.querySelector("#goalCard");
   if (!mStats.length) { container.innerHTML = ""; return; }
 
-  const { inc, out } = filt();
-  const active = S.mode === "in" ? inc : out;
-  const cw = S.mode === "in" ? cwIn(active) : cwOut(active);
-  const total = round1(sum(Object.values(cw)));
-  const nrKg = round1(cw["Non Recycle"] || 0);
-  const nrPct = total > 0 ? round1(nrKg / total * 1000) / 10 : 0;
-  const passed = nrPct <= NR_TARGET;
+  const scopeLabel = S.bld !== "all" ? `เฉพาะ${S.bld.length > 2 ? S.bld : "อาคาร " + S.bld}`
+    : S.bg !== "all" ? `เฉพาะกลุ่มอาคาร ${S.bg}` : "ทุกอาคาร";
+  const bldBig = S.bld !== "all" ? (S.bld.length > 2 ? S.bld : "อาคาร " + S.bld)
+    : S.bg !== "all" ? `กลุ่มอาคาร ${S.bg}` : "ทุกอาคาร";
 
-  const prevP = S.pOpts[S.pIdx + 1];
-  let trend = null;
-  if (prevP) {
-    const prevRecs = S.mode === "in"
-      ? S.allIn.filter(r => r.date >= prevP.s && r.date <= prevP.e && (S.bg === "all" || r.buildingGroup === S.bg) && (S.bld === "all" || r.buildingCode === S.bld))
-      : S.allOut.filter(r => r.date >= prevP.s && r.date <= prevP.e);
-    const prevCw = S.mode === "in" ? cwIn(prevRecs) : cwOut(prevRecs);
-    const prevTotal = round1(sum(Object.values(prevCw)));
-    const prevNrPct = prevTotal > 0 ? round1((prevCw["Non Recycle"] || 0) / prevTotal * 1000) / 10 : 0;
-    trend = round1((nrPct - prevNrPct) * 10) / 10;
-  }
-
-  const margin = round1((NR_TARGET - nrPct) * 10) / 10;
-  const marginKg = total > 0 ? round1(Math.abs(margin) / 100 * total) : 0;
-  const detail = passed
-    ? `ต่ำกว่าเป้า ${Math.abs(margin).toFixed(1)}% — เหลือ margin ${fN(marginKg)} กก.`
-    : `ต้องลดอีก ${fN(marginKg)} กก. เพื่อให้ถึงเป้า`;
-
-  const barW = Math.min(nrPct / 15 * 100, 100);
-  const barC = passed ? "var(--success)" : "var(--danger)";
-  const last6 = mStats.slice(-6);
+  const labels = mStats.map(m => MS[Number(m.month.slice(5, 7)) - 1]);
+  const values = mStats.map(m => m.nrPct);
+  const exceedCount = values.filter(v => v > NR_TARGET).length;
+  const totalKg = sum(mStats.map(m => m.total));
+  const nrKg = sum(mStats.map(m => m.cats["Non Recycle"] || 0));
+  const avgPct = totalKg > 0 ? round1(nrKg / totalKg * 1000) / 10 : 0;
+  const avgColor = avgPct <= NR_TARGET ? GOAL_PASS : GOAL_FAIL;
 
   container.innerHTML = `
-    <div class="goal-card ${passed ? 'pass' : 'fail'}">
-      <div class="goal-header">🎯 เป้าหมาย: Non Recycle ≤ ${NR_TARGET}%</div>
-      <div class="goal-body">
-        <div class="goal-main">
-          <div class="goal-progress"><div class="goal-bar" style="width:${barW}%;background:${barC}"></div></div>
-          <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-            <span class="num" style="color:${barC};font-size:28px;font-weight:700">${nrPct.toFixed(1)}%</span>
-            <span style="color:${barC};font-weight:600;font-size:14px">${passed ? '✅ ผ่านเป้า' : '⚠️ เกินเป้า'}</span>
-          </div>
-          <div style="font-size:13px;color:var(--text-2);margin-top:6px">${fN(nrKg)} กก. จากทั้งหมด ${fN(total)} กก.</div>
-          ${trend !== null ? `<div style="font-size:13px;margin-top:4px;color:${trend > 0 ? 'var(--danger)' : trend < 0 ? 'var(--success)' : 'var(--text-3)'}">${trend > 0 ? '↑ เพิ่ม' : trend < 0 ? '↓ ลด' : '→ เท่าเดิม'} ${Math.abs(trend).toFixed(1)}% จากงวดก่อน</div>` : ''}
-          <div style="font-size:13px;color:var(--text-2);margin-top:4px;font-weight:500">${detail}</div>
+    <div class="goal-chart-card">
+      <div class="goal-top">
+        <div class="goal-scope-pill">Guideline · ${scopeLabel}</div>
+        <div class="goal-legend">
+          <span><i class="dot pass"></i>ผ่านเป้า</span>
+          <span><i class="dot fail"></i>เกินเป้า</span>
+          <span><i class="dash"></i>เส้นเป้าหมาย</span>
         </div>
-        <div class="goal-spark" id="goalSpark"></div>
       </div>
+      <div class="goal-title">สัดส่วน Non Recycle เทียบขยะทั้งหมด</div>
+      <div class="goal-sub">เป้าหมาย: ไม่เกิน ${NR_TARGET}% ของขยะทั้งหมด (ย้อนหลัง ${mStats.length} เดือน)</div>
+      <div class="goal-chart-head">
+        <div>
+          <div class="goal-bld-name">${bldBig}</div>
+          <div class="goal-exceed ${exceedCount > 0 ? 'fail' : 'pass'}">เกินเป้า ${exceedCount} / ${values.length} เดือน</div>
+        </div>
+        <div class="goal-avg">
+          <div class="goal-avg-label">เฉลี่ยย้อนหลัง</div>
+          <div class="goal-avg-val" style="color:${avgColor}">${avgPct.toFixed(1)}%</div>
+        </div>
+      </div>
+      <div class="chart-box" style="height:280px"><canvas id="cGoal"></canvas></div>
     </div>`;
 
-  if (last6.length >= 2) {
-    const el = container.querySelector("#goalSpark");
-    const vals = last6.map(m => m.nrPct);
-    S.ch.goalSp = sparkCanvas(el, vals, { w: 180, h: 70, color: "#1E88E5", target: NR_TARGET, min: 0, max: Math.max(15, ...vals) + 2 });
-  }
+  const maxY = Math.max(NR_TARGET, ...values) + 3;
+  S.ch.goal = new Chart(container.querySelector("#cGoal"), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: "Non Recycle %",
+          data: values,
+          backgroundColor: values.map(v => v <= NR_TARGET ? GOAL_PASS : GOAL_FAIL),
+          borderRadius: 4,
+          maxBarThickness: 46,
+          order: 2,
+          datalabels: {
+            display: true, anchor: "end", align: "top",
+            color: (ctx) => values[ctx.dataIndex] <= NR_TARGET ? GOAL_PASS : GOAL_FAIL,
+            font: { weight: "bold", size: 11.5 },
+            formatter: (v) => v.toFixed(1) + "%",
+          },
+        },
+        {
+          type: "line",
+          label: "เส้นเป้าหมาย",
+          data: labels.map(() => NR_TARGET),
+          borderColor: GOAL_FAIL,
+          borderDash: [6, 4],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          order: 1,
+          datalabels: { display: false },
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 22 } },
+      plugins: { legend: { display: false }, datalabels: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, suggestedMax: maxY, grid: { color: "#E8E6DF" }, ticks: { font: { size: 11 }, callback: v => v + "%" } },
+      },
+    },
+  });
 }
 
 function renderAnomalyCards(mStats) {
