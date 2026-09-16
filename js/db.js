@@ -16,6 +16,7 @@ import {
 
 const INCOMING = "incomingRecords";
 const OUTGOING = "outgoingRecords";
+const OCCUPANCY = "buildingOccupancy";
 
 export function incomingDocId(date, buildingCode) {
   return `${date}_${buildingCode}`;
@@ -83,6 +84,32 @@ export async function updateOutgoingRecord(id, data, userEmail) {
 
 export async function deleteOutgoingRecord(id) {
   await deleteDoc(doc(db, OUTGOING, id));
+}
+
+export function occupancyDocId(month, buildingCode) {
+  return `${month}_${buildingCode}`;
+}
+
+export async function upsertOccupancy(record, userEmail) {
+  const id = occupancyDocId(record.month, record.buildingCode);
+  const ref = doc(db, OCCUPANCY, id);
+  await setDoc(ref, {
+    ...record,
+    updatedBy: userEmail || null,
+    updatedAt: new Date().toISOString(),
+  });
+  return id;
+}
+
+export async function queryOccupancyRange(startMonth, endMonth) {
+  const q = query(
+    collection(db, OCCUPANCY),
+    where("month", ">=", startMonth),
+    where("month", "<=", endMonth),
+    orderBy("month", "asc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 // One-time historical import helper, used by tools/import-seed.html only.

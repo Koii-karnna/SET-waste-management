@@ -2,7 +2,7 @@ import {
   WASTE_ITEMS, WASTE_ITEM_BY_ID, CATEGORIES, CATEGORY_LABELS_TH,
   CATEGORY_COLORS, BUILDINGS, OTHER_ITEM_ID
 } from "../data/wasteItems.js";
-import { queryIncomingRange, queryOutgoingRange } from "../db.js";
+import { queryIncomingRange, queryOutgoingRange, queryOccupancyRange } from "../db.js";
 import { DISPOSAL_ORDER, DISPOSAL_COLOR, USABLE_GROUPS, disposalGroup } from "../data/disposal.js";
 import { todayISO, parseISO, toISO, addDays, weekRange, round1, sum } from "../utils.js";
 import { showToast } from "../main.js";
@@ -29,7 +29,7 @@ let S = { ch: {} };
 function init() {
   const now = new Date();
   return { mode: "in", bg: "all", bld: "all", yr: now.getFullYear(), pType: "monthly", pOpts: [], pIdx: 0,
-           inD: [], outD: [], allIn: [], allOut: [], ch: {}, root: null };
+           inD: [], outD: [], allIn: [], allOut: [], allOcc: [], ch: {}, root: null };
 }
 function destroyCh() { if (S.ch) Object.values(S.ch).forEach(c => { try { c.destroy(); } catch (_) {} }); S.ch = {}; }
 
@@ -278,7 +278,7 @@ function html() {
 <div class="grid-2e">
   <div class="panel">
     <span class="panel-title">ผู้ใช้อาคาร vs ขยะต่อคน</span>
-    <div class="panel-hint">กก./คน/วัน (ประมาณจากผู้ใช้ ~${EST_POP} คน/วัน)</div>
+    <div class="panel-hint">กก./คน/วัน (อิงจำนวนผู้ใช้อาคารที่บันทึกไว้ต่อเดือน ถ้าไม่มีข้อมูลใช้ค่าประมาณ ~${EST_POP} คน/วัน)</div>
     <div class="chart-box" style="height:240px"><canvas id="cP"></canvas></div>
   </div>
   <div class="panel">
@@ -337,8 +337,12 @@ async function load() {
   const fetchS = histS < p.s ? histS : p.s;
   const fetchE = histE > p.e ? histE : p.e;
   try {
-    const [aIn, aOut] = await Promise.all([queryIncomingRange(fetchS, fetchE), queryOutgoingRange(fetchS, fetchE)]);
-    S.allIn = aIn; S.allOut = aOut;
+    const [aIn, aOut, aOcc] = await Promise.all([
+      queryIncomingRange(fetchS, fetchE),
+      queryOutgoingRange(fetchS, fetchE),
+      queryOccupancyRange(fetchS.slice(0, 7), fetchE.slice(0, 7)),
+    ]);
+    S.allIn = aIn; S.allOut = aOut; S.allOcc = aOcc;
     let fS = p.s, fE = p.e;
     if (S.pType === "monthly" && S.pIdx > 0) {
       fS = weekRange(p.s).start;
@@ -346,7 +350,7 @@ async function load() {
     }
     S.inD = aIn.filter(r => r.date >= fS && r.date <= fE);
     S.outD = aOut.filter(r => r.date >= fS && r.date <= fE);
-  } catch (err) { showToast("โหลดข้อมูลไม่สำเร็จ: " + err.message, true); S.inD = []; S.outD = []; S.allIn = []; S.allOut = []; }
+  } catch (err) { showToast("โหลดข้อมูลไม่สำเร็จ: " + err.message, true); S.inD = []; S.outD = []; S.allIn = []; S.allOut = []; S.allOcc = []; }
   renderAll();
 }
 
@@ -357,6 +361,17 @@ function filt() {
   let out = S.outD;
   if (S.bg !== "all") out = out.filter(r => r.buildingGroup === S.bg);
   return { inc, out };
+}
+
+// Sum of recorded building-user headcounts for a given month ("YYYY-MM"), scoped to the
+// current building filter. Returns null when nothing has been entered yet, so callers can
+// fall back to the EST_POP estimate.
+function occForMonth(month) {
+  let recs = S.allOcc.filter(r => r.month === month);
+  if (S.bg !== "all") recs = recs.filter(r => r.buildingGroup === S.bg);
+  if (S.bld !== "all") recs = recs.filter(r => r.buildingCode === S.bld);
+  if (!recs.length) return null;
+  return sum(recs.map(r => r.userCount || 0));
 }
 
 function cwIn(recs) {
@@ -742,15 +757,21 @@ function getPCPeriods(recs, mode) {
     } else {
       const [y, m] = k.split("-").map(Number); lbl = MS[m - 1]; days = new Date(y, m, 0).getDate();
     }
-    return { k, lbl, kg: round1(v.kg), days };
+    return { k, lbl, kg: round1(v.kg), days, month: k.slice(0, 7) };
   });
+}
+
+// Building headcount to use for a per-capita period: real recorded data if available,
+// otherwise the EST_POP placeholder.
+function popForPeriod(period) {
+  return occForMonth(period.month) ?? EST_POP;
 }
 
 function renderPC(recs) {
   const periods = getPCPeriods(recs, S.mode);
   if (!periods.length) return;
   const labels = periods.map(p => p.lbl);
-  const kpd = periods.map(p => Math.round(p.kg / EST_POP / p.days * 100) / 100);
+  const kpd = periods.map(p => Math.round(p.kg / popForPeriod(p) / p.days * 100) / 100);
   const totK = periods.map(p => round1(p.kg / 1000));
 
   S.ch.pc = new Chart(S.root.querySelector("#cP"), {
@@ -1152,8 +1173,8 @@ async function doPpt() {
       disposalLabels: disposalPeriods.map(x => x.lbl),
       disposalData: disposalPeriods.map(x => x.d),
       pcLabels: pcPeriods.map(x => x.lbl),
-      pcKpd: pcPeriods.map(pd => Math.round(pd.kg / EST_POP / pd.days * 100) / 100),
-      estPop: EST_POP,
+      pcKpd: pcPeriods.map(pd => Math.round(pd.kg / popForPeriod(pd) / pd.days * 100) / 100),
+      pcHint: `กก./คน/วัน (อิงจำนวนผู้ใช้อาคารที่บันทึกไว้ต่อเดือน ถ้าไม่มีข้อมูลใช้ค่าประมาณ ~${EST_POP} คน/วัน)`,
       yearlyLabels: yearly.years.map(y => String(BE(y))),
       yearlyCatTotals: yearly.years.map(y => yearly.catTotals[y]),
       catCards: computeCatCards(inc),

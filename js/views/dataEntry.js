@@ -1,17 +1,18 @@
 import { WASTE_ITEMS, CATEGORIES, CATEGORY_LABELS_TH, CATEGORY_COLORS, OTHER_ITEM_ID, BUILDINGS } from "../data/wasteItems.js";
 import { DESTINATIONS, DESTINATION_BY_NAME, DISPOSAL_METHODS, VEHICLE_TYPES } from "../data/destinations.js";
-import { getIncoming, upsertIncoming, addOutgoing, queryOutgoingRange, updateOutgoingRecord, deleteOutgoingRecord } from "../db.js";
+import { getIncoming, upsertIncoming, addOutgoing, queryOutgoingRange, updateOutgoingRecord, deleteOutgoingRecord, upsertOccupancy, queryOccupancyRange } from "../db.js";
 import { getCurrentUser } from "../auth.js";
 import { todayISO, round1 } from "../utils.js";
 import { showToast } from "../main.js";
 
-let subMode = "in"; // "in" | "out"
+let subMode = "in"; // "in" | "out" | "occ"
 
 export function renderDataEntry(container) {
   container.innerHTML = `
     <div class="pill-toggle" id="entry-pill">
       <button data-mode="in" class="${subMode === "in" ? "active" : ""}">ขาเข้า</button>
       <button data-mode="out" class="${subMode === "out" ? "active" : ""}">ขาออก</button>
+      <button data-mode="occ" class="${subMode === "occ" ? "active" : ""}">ผู้ใช้อาคาร</button>
     </div>
     <div id="entry-body"></div>
   `;
@@ -23,7 +24,8 @@ export function renderDataEntry(container) {
   });
   const body = container.querySelector("#entry-body");
   if (subMode === "in") renderIncomingForm(body);
-  else renderOutgoingForm(body);
+  else if (subMode === "out") renderOutgoingForm(body);
+  else renderOccupancyForm(body);
 }
 
 // ---------------- ขาเข้า ----------------
@@ -518,5 +520,104 @@ function renderPendingTable(root) {
       pendingRows.splice(Number(btn.dataset.remove), 1);
       renderPendingTable(root);
     });
+  });
+}
+
+// ---------------- ผู้ใช้อาคาร ----------------
+
+function currentMonthISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function renderOccupancyForm(root) {
+  root.innerHTML = `
+    <div class="card">
+      <div class="field-row">
+        <div class="field">
+          <label>เดือน</label>
+          <input type="month" id="occ-month" value="${currentMonthISO()}" />
+        </div>
+        <div class="field">
+          <button class="btn" id="occ-load">โหลดข้อมูลเดิม</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="occ-table">
+          <thead><tr><th>กลุ่มอาคาร</th><th>อาคาร</th><th style="width:180px">จำนวนผู้ใช้อาคาร (คน)</th></tr></thead>
+          <tbody>
+            ${Object.entries(BUILDINGS)
+              .map(([group, codes]) =>
+                codes
+                  .map(
+                    (code) => `<tr>
+                      <td>${group}</td>
+                      <td>${code.length > 2 ? code : "อาคาร " + code}</td>
+                      <td><input type="number" min="0" step="1" data-group="${group}" data-building="${code}" value="" /></td>
+                    </tr>`
+                  )
+                  .join("")
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <div class="field-row" style="margin-top:16px;">
+        <button class="btn primary" id="occ-save">บันทึก</button>
+        <span class="muted" id="occ-status"></span>
+      </div>
+    </div>
+  `;
+
+  function fill(records) {
+    root.querySelectorAll("#occ-table input[data-building]").forEach((input) => (input.value = ""));
+    for (const rec of records) {
+      const input = root.querySelector(`input[data-building="${rec.buildingCode}"]`);
+      if (input) input.value = rec.userCount;
+    }
+  }
+
+  root.querySelector("#occ-load").addEventListener("click", async () => {
+    const month = root.querySelector("#occ-month").value;
+    if (!month) return showToast("กรุณาเลือกเดือน", true);
+    const status = root.querySelector("#occ-status");
+    status.textContent = "กำลังโหลด...";
+    try {
+      const records = await queryOccupancyRange(month, month);
+      fill(records);
+      status.textContent = records.length > 0 ? `พบข้อมูล ${records.length} อาคาร` : "ยังไม่มีข้อมูลเดือนนี้";
+    } catch (err) {
+      status.textContent = "";
+      showToast("โหลดข้อมูลไม่สำเร็จ: " + err.message, true);
+    }
+  });
+
+  root.querySelector("#occ-save").addEventListener("click", async () => {
+    const month = root.querySelector("#occ-month").value;
+    if (!month) return showToast("กรุณาเลือกเดือน", true);
+    const inputs = [...root.querySelectorAll("#occ-table input[data-building]")].filter((i) => i.value !== "");
+    if (inputs.length === 0) return showToast("กรุณากรอกจำนวนผู้ใช้อาคารอย่างน้อย 1 อาคาร", true);
+    const saveBtn = root.querySelector("#occ-save");
+    const status = root.querySelector("#occ-status");
+    saveBtn.disabled = true;
+    status.textContent = "กำลังบันทึก...";
+    try {
+      const user = getCurrentUser()?.email;
+      for (const input of inputs) {
+        const userCount = Math.round(parseFloat(input.value));
+        if (!(userCount >= 0)) continue;
+        await upsertOccupancy(
+          { month, buildingGroup: input.dataset.group, buildingCode: input.dataset.building, userCount },
+          user
+        );
+      }
+      showToast(`บันทึกจำนวนผู้ใช้อาคารเดือน ${month} สำเร็จ`);
+      status.textContent = "";
+    } catch (err) {
+      showToast("บันทึกไม่สำเร็จ: " + err.message, true);
+      status.textContent = "";
+    } finally {
+      saveBtn.disabled = false;
+    }
   });
 }

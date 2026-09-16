@@ -306,7 +306,7 @@ function disposalTrendSlide(pptx, dash) {
 /* ── ผู้ใช้อาคาร vs ขยะต่อคน (line, ขาเข้า) ── */
 function perCapitaSlide(pptx, dash) {
   const s = pptx.addSlide();
-  pageHeader(s, "ผู้ใช้อาคาร vs ขยะต่อคน (ขาเข้า)", `กก./คน/วัน (ประมาณจากผู้ใช้ ~${dash.estPop || 900} คน/วัน)`);
+  pageHeader(s, "ผู้ใช้อาคาร vs ขยะต่อคน (ขาเข้า)", dash.pcHint || "กก./คน/วัน (ประมาณจากผู้ใช้ ~900 คน/วัน)");
 
   s.addChart(pptx.ChartType.line, [{ name: "กก./คน/วัน", labels: dash.pcLabels, values: dash.pcKpd }], {
     x: 1.2, y: 1.7, w: 10.93, h: 5.3,

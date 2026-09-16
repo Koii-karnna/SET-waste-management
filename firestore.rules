@@ -23,5 +23,12 @@ service cloud.firestore {
       allow create, update, delete: if request.auth != null
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
     }
+
+    // buildingOccupancy — monthly headcount per building; viewer can read, editor can write
+    match /buildingOccupancy/{docId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
+    }
   }
 }
