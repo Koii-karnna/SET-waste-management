@@ -788,8 +788,8 @@ function renderPC(recs) {
       plugins: { legend: { position: "bottom", labels: { usePointStyle: true, padding: 12, font: { size: 11 } } }, datalabels: { display: false } },
       scales: {
         x: { grid: { display: false }, ticks: { font: { size: 11 }, maxRotation: 45 } },
-        y: { position: "left", grid: { color: "#E8E6DF" }, title: { display: true, text: "กก./คน/วัน", font: { size: 11 } }, ticks: { font: { size: 11 } } },
-        y2: { position: "right", grid: { display: false }, title: { display: true, text: "พัน กก.", font: { size: 11 } }, ticks: { font: { size: 11 } } }
+        y: { position: "left", beginAtZero: true, grid: { color: "#E8E6DF" }, title: { display: true, text: "กก./คน/วัน", font: { size: 11 } }, ticks: { font: { size: 11 } } },
+        y2: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: "พัน กก.", font: { size: 11 } }, ticks: { font: { size: 11 } } }
       }
     }
   });

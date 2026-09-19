@@ -315,7 +315,7 @@ function perCapitaSlide(pptx, dash) {
     lineDataSymbolSize: 6, lineSize: 2.5,
     showValue: true, dataLabelPosition: "t", dataLabelColor: BLACK, dataLabelFontSize: 10,
     catAxisLabelFontSize: 11, catAxisLabelColor: MUTED,
-    valAxisLabelFontSize: 10, valAxisLabelColor: MUTED,
+    valAxisLabelFontSize: 10, valAxisLabelColor: MUTED, valAxisMinVal: 0,
     valGridLine: { color: LINE }, catGridLine: { style: "none" },
     plotArea: { fill: { color: "FFFFFF" } },
   });
