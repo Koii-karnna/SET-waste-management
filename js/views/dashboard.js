@@ -181,11 +181,14 @@ function monthlyInsight(recs, mode, filterFn) {
       if (r.itemId) byM[m].items[r.itemId] = (byM[m].items[r.itemId] || 0) + r.weightKg;
     }
   }
-  return Object.entries(byM).sort((a, b) => a[0].localeCompare(b[0])).map(([m, d]) => ({
-    month: m, total: round1(d.total), cats: d.cats, items: d.items,
-    nrPct: d.total > 0 ? round1((d.cats["Non Recycle"] || 0) / d.total * 1000) / 10 : 0,
-    organicKg: round1(d.cats.Organic || 0)
-  }));
+  return Object.entries(byM).sort((a, b) => a[0].localeCompare(b[0])).map(([m, d]) => {
+    const nrBase = (d.cats.Organic || 0) + (d.cats.Recycle || 0) + (d.cats["Non Recycle"] || 0);
+    return {
+      month: m, total: round1(d.total), cats: d.cats, items: d.items, nrBase: round1(nrBase),
+      nrPct: nrBase > 0 ? round1((d.cats["Non Recycle"] || 0) / nrBase * 1000) / 10 : 0,
+      organicKg: round1(d.cats.Organic || 0)
+    };
+  });
 }
 
 function linearReg(xs, ys) {
@@ -996,9 +999,9 @@ function renderGoal(mStats) {
   const labels = mStats.map(m => MS[Number(m.month.slice(5, 7)) - 1]);
   const values = mStats.map(m => m.nrPct);
   const exceedCount = values.filter(v => v > NR_TARGET).length;
-  const totalKg = sum(mStats.map(m => m.total));
+  const baseKg = sum(mStats.map(m => m.nrBase));
   const nrKg = sum(mStats.map(m => m.cats["Non Recycle"] || 0));
-  const avgPct = totalKg > 0 ? round1(nrKg / totalKg * 1000) / 10 : 0;
+  const avgPct = baseKg > 0 ? round1(nrKg / baseKg * 1000) / 10 : 0;
   const avgColor = avgPct <= NR_TARGET ? GOAL_PASS : GOAL_FAIL;
 
   container.innerHTML = `
@@ -1011,8 +1014,8 @@ function renderGoal(mStats) {
           <span><i class="dash"></i>เส้นเป้าหมาย</span>
         </div>
       </div>
-      <div class="goal-title">สัดส่วน Non Recycle เทียบขยะทั้งหมด</div>
-      <div class="goal-sub">เป้าหมาย: ไม่เกิน ${NR_TARGET}% ของขยะทั้งหมด (ย้อนหลัง ${mStats.length} เดือน)</div>
+      <div class="goal-title">สัดส่วน Non Recycle เทียบ Organic + Recycle + Non Recycle</div>
+      <div class="goal-sub">เป้าหมาย: ไม่เกิน ${NR_TARGET}% ของขยะสามประเภทรวม (ย้อนหลัง ${mStats.length} เดือน)</div>
       <div class="goal-chart-head">
         <div>
           <div class="goal-bld-name">${bldBig}</div>
