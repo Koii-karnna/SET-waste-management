@@ -825,7 +825,7 @@ async function renderYearly() {
   if (reqId !== yrReqId || !S.root || !S.root.isConnected) return;
   const labels = years.map(y => String(BE(y)));
   const totals = years.map(y => round1(sum(CATEGORIES.map(c => catTotals[y][c] || 0))));
-  const datasets = CATEGORIES.map(cat => ({
+  const datasets = STACK_CAT.map(cat => ({
     label: cat,
     data: years.map(y => round1(catTotals[y][cat] || 0)),
     backgroundColor: CATEGORY_COLORS[cat],
@@ -889,7 +889,7 @@ async function renderYearly() {
   });
 
   const stLYr = S.root.querySelector("#stLegendYr");
-  stLYr.innerHTML = CATEGORIES.map(cat =>
+  stLYr.innerHTML = STACK_CAT.map(cat =>
     `<span class="st-leg-item"><span class="st-leg-dot" style="background:${CATEGORY_COLORS[cat]}"></span>${CATEGORY_LABELS_TH[cat] || cat}</span>`
   ).join("");
 }

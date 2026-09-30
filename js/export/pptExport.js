@@ -328,7 +328,7 @@ function yearlySlide(pptx, dash) {
 
   const labels = dash.yearlyLabels;
   const totals = dash.yearlyCatTotals.map((cw) => round1(sum(CATEGORIES.map((c) => cw[c] || 0))));
-  const barSeries = CATEGORIES.map((cat) => ({
+  const barSeries = STACK_CAT.map((cat) => ({
     name: CATEGORY_LABELS_TH[cat] || cat,
     labels,
     values: dash.yearlyCatTotals.map((cw) => round1(cw[cat] || 0)),
@@ -341,7 +341,7 @@ function yearlySlide(pptx, dash) {
         type: pptx.ChartType.bar,
         data: barSeries,
         options: {
-          chartColors: CATEGORIES.map((c) => hx(CATEGORY_COLORS[c])),
+          chartColors: STACK_CAT.map((c) => hx(CATEGORY_COLORS[c])),
           showValue: true, dataLabelPosition: "ctr", dataLabelColor: "FFFFFF", dataLabelFontSize: 10, dataLabelFormatCode: "#,##0",
         },
       },
