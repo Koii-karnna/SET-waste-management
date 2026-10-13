@@ -80,6 +80,12 @@ export const DESTINATIONS = [
     destinationAddress: "78/2 หมู่ 1 ซอยติวานนท์-ปากเกร็ด 1 อำเภอปากเกร็ด จังหวัดนนทบุรี 11120",
     vehicleType: "รถตู้ SET",
   },
+  {
+    destination: "สถาบันวิทยาการตลาดทุน",
+    disposalMethod: "หมักทำปุ๋ย",
+    destinationAddress: "2/9 หมู่ 4 ถนนวิภาวดี รังสิต แขวงทุ่งสองห้อง เขตหลักสี่ กรุงเทพฯ 10210",
+    vehicleType: "รถตู้ SET",
+  },
 ];
 
 export const DESTINATION_BY_NAME = Object.fromEntries(DESTINATIONS.map((d) => [d.destination, d]));
