@@ -164,7 +164,8 @@
           let destination = String(row[4] || "").trim();
           let disposalMethod = String(row[5] || "").trim();
           if (destination === "SCIeco") disposalMethod = "เผา RDF";
-          if (destination === "ห้องทำดิน C1") destination = "ห้องทำดิน/ปุ๋ย C1";
+          const DEST_ALIASES = { "ห้องทำดิน C1": "ห้องทำดิน/ปุ๋ย C1", "Iron mountain": "Iron Mountain", "D Caer": "Dcare", "BigC": "BigC(บริจาค)" };
+          if (DEST_ALIASES[destination]) destination = DEST_ALIASES[destination];
           if (disposalMethod.replace(/\s+/g, "") === "หมักปุ๋ย/น้ำหมัก") disposalMethod = "ทำดิน/ปุ๋ย";
           const destinationAddress = String(row[6] || "").trim();
           const vehicleType = String(row[7] || "").trim();
