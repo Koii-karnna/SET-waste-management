@@ -33,8 +33,8 @@ export const DESTINATIONS = [
     vehicleType: "รถบรรทุก 4 ล้อใหญ่",
   },
   {
-    destination: "ห้องทำดิน C1",
-    disposalMethod: "หมักปุ๋ย / น้ำหมัก",
+    destination: "ห้องทำดิน/ปุ๋ย C1",
+    disposalMethod: "ทำดิน/ปุ๋ย",
     destinationAddress: "93 ถ. รัชดาภิเษก แขวงดินแดง เขตดินแดง กรุงเทพมหานคร 10400",
     vehicleType: "-",
   },
@@ -95,8 +95,9 @@ export const DISPOSAL_METHODS = [
   "เผา RDF",
   "เผาทำลาย",
   "หมัก/ทำอาหารปลา",
-  "หมักปุ๋ย / น้ำหมัก",
+  "หมักทำปุ๋ย",
   "ทำดิน/ปุ๋ย",
+  "ฝังกลบ",
 ];
 
 export const VEHICLE_TYPES = ["รถกระบะ", "รถกระบะตู้ทึบ", "รถตู้", "รถตู้ SET", "รถบรรทุก 4 ล้อใหญ่", "ไปรษณีย์", "-"];

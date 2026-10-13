@@ -161,9 +161,11 @@
           const category = String(row[1] || "").trim();
           const itemName = String(row[2] || "").trim();
           const { id: itemId, matched } = resolveItemId(itemName);
-          const destination = String(row[4] || "").trim();
+          let destination = String(row[4] || "").trim();
           let disposalMethod = String(row[5] || "").trim();
           if (destination === "SCIeco") disposalMethod = "เผา RDF";
+          if (destination === "ห้องทำดิน C1") destination = "ห้องทำดิน/ปุ๋ย C1";
+          if (disposalMethod.replace(/\s+/g, "") === "หมักปุ๋ย/น้ำหมัก") disposalMethod = "ทำดิน/ปุ๋ย";
           const destinationAddress = String(row[6] || "").trim();
           const vehicleType = String(row[7] || "").trim();
           out.push({
