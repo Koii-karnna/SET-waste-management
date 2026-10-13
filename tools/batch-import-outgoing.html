@@ -51,6 +51,10 @@
       import { login, onAuthChange, authErrorMessage } from "../js/auth.js";
       import { db, collection, doc, writeBatch } from "../js/firebase-init.js";
       import { queryOutgoingRange } from "../js/db.js";
+      import { DESTINATION_BY_NAME } from "../js/data/destinations.js";
+
+      // Items that always go to one destination, whatever the Excel says.
+      const ITEM_DESTINATION = { "2": "สถาบันวิทยาการตลาดทุน", "19": "ศูนย์เทคโนโลยีการศึกษาเพื่อคนตาบอด" };
 
       // ── Item mapping (same as incoming) ──
       const ITEMS = {
@@ -167,8 +171,14 @@
           const DEST_ALIASES = { "ห้องทำดิน C1": "ห้องทำดิน/ปุ๋ย C1", "Iron mountain": "Iron Mountain", "D Caer": "Dcare", "BigC": "BigC(บริจาค)" };
           if (DEST_ALIASES[destination]) destination = DEST_ALIASES[destination];
           if (disposalMethod.replace(/\s+/g, "") === "หมักปุ๋ย/น้ำหมัก") disposalMethod = "ทำดิน/ปุ๋ย";
-          const destinationAddress = String(row[6] || "").trim();
-          const vehicleType = String(row[7] || "").trim();
+          let destinationAddress = String(row[6] || "").trim();
+          let vehicleType = String(row[7] || "").trim();
+          const fixedDest = ITEM_DESTINATION[itemId] && DESTINATION_BY_NAME[ITEM_DESTINATION[itemId]];
+          if (fixedDest) {
+            destination = fixedDest.destination;
+            destinationAddress = fixedDest.destinationAddress;
+            vehicleType = fixedDest.vehicleType;
+          }
           out.push({
             date, itemId, category, weightKg: Math.round(weight*10)/10,
             destination, disposalMethod, destinationAddress, vehicleType,
