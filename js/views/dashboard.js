@@ -366,6 +366,15 @@ function filt() {
   return { inc, out };
 }
 
+// filt() extends a selected month to whole Mon–Sun weeks for the weekly bar charts;
+// totals (KPI cards, exported tables) must stick to the selected calendar period.
+function filtPeriod() {
+  const p = S.pOpts[S.pIdx];
+  const { inc, out } = filt();
+  const inP = r => r.date >= p.s && r.date <= p.e;
+  return { inc: inc.filter(inP), out: out.filter(inP) };
+}
+
 // Sum of recorded building-user headcounts for a given month ("YYYY-MM"), scoped to the
 // current building filter. Returns null when nothing has been entered yet, so callers can
 // fall back to the EST_POP estimate.
@@ -468,7 +477,8 @@ function renderAll() {
   destroyCh();
   const { inc, out } = filt();
   const active = S.mode === "in" ? inc : out;
-  const cw = S.mode === "in" ? cwIn(active) : cwOut(active);
+  const per = filtPeriod();
+  const cw = S.mode === "in" ? cwIn(per.inc) : cwOut(per.out);
   const total = round1(sum(Object.values(cw)));
   renderKPI(cw, total);
   renderStack(getStackPeriods(active, S.mode));
@@ -1178,14 +1188,15 @@ function renderForecastHtml(mStats) {
 /* ══════════════════════════════════ EXPORT ═══════════════════════════════════════ */
 
 async function doXls() {
-  const { inc, out } = filt(); const p = S.pOpts[S.pIdx];
+  const { inc, out } = filtPeriod(); const p = S.pOpts[S.pIdx];
   try { exportExcel({ incoming: inc, outgoing: out, start: p.s, end: p.e, label: p.l }, aggregateIncoming(inc), aggregateOutgoing(out)); showToast("ดาวน์โหลดไฟล์ Excel แล้ว"); }
   catch (e) { showToast("Export Excel ไม่สำเร็จ: " + e.message, true); }
 }
 async function doPpt() {
   const { inc, out } = filt(); const p = S.pOpts[S.pIdx];
+  const per = filtPeriod();
   try {
-    const cw = cwIn(inc);
+    const cw = cwIn(per.inc);
     const total = round1(sum(Object.values(cw)));
     const stackPeriods = getStackPeriods(inc, "in");
     const bldCodes = [...new Set(inc.map(r => r.buildingCode))].sort();
@@ -1213,7 +1224,7 @@ async function doPpt() {
       yearlyCatTotals: yearly.years.map(y => yearly.catTotals[y]),
       catCards: computeCatCards(inc),
     };
-    await exportPptx({ incoming: inc, outgoing: out, start: p.s, end: p.e, label: p.l }, aggregateIncoming(inc), aggregateOutgoing(out), dash);
+    await exportPptx({ incoming: per.inc, outgoing: per.out, start: p.s, end: p.e, label: p.l }, aggregateIncoming(per.inc), aggregateOutgoing(per.out), dash);
     showToast("ดาวน์โหลดไฟล์ PowerPoint แล้ว");
   }
   catch (e) { showToast("Export PowerPoint ไม่สำเร็จ: " + e.message, true); }
