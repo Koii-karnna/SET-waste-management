@@ -110,6 +110,17 @@ function applyRole() {
   }
 }
 
+// กันหมุนลูกกลิ้งเมาส์แล้วตัวเลขในช่องน้ำหนักเปลี่ยนเองโดยไม่รู้ตัว:
+// ถ้าช่อง number กำลัง focus อยู่ ให้ปลด focus ก่อน ค่าจะไม่เปลี่ยน และหน้าเว็บเลื่อนตามปกติแทน
+document.addEventListener(
+  "wheel",
+  (e) => {
+    const el = document.activeElement;
+    if (el && el.type === "number" && el === e.target) el.blur();
+  },
+  { passive: true }
+);
+
 // Password visibility toggle
 const pwToggle = document.getElementById("pw-toggle");
 const pwInput = document.getElementById("login-password");
